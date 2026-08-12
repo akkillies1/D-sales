@@ -1,0 +1,6 @@
+{
+  "name": "Sales Dashboard",
+  "description": "A sales funnel and leads management dashboard connected to Google Sheets",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
