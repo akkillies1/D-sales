@@ -9,6 +9,7 @@ import {
   ExternalLink,
   RefreshCw,
   X,
+  LogOut,
 } from 'lucide-react';
 
 interface SidebarProps {
@@ -20,6 +21,7 @@ interface SidebarProps {
   isLoading: boolean;
   isOpenMobile?: boolean;
   onCloseMobile?: () => void;
+  onSignOut?: () => void;
 }
 
 export const Sidebar: React.FC<SidebarProps> = ({
@@ -31,6 +33,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   isLoading,
   isOpenMobile = false,
   onCloseMobile,
+  onSignOut,
 }) => {
   const navItems: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
     {
@@ -78,12 +81,23 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
         </div>
         {onCloseMobile && (
-          <button
-            onClick={onCloseMobile}
-            className="md:hidden text-zinc-400 hover:text-white p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
+          <div className="flex items-center space-x-2">
+            <button
+              onClick={onCloseMobile}
+              className="md:hidden text-zinc-400 hover:text-white p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+            >
+              <X className="w-5 h-5" />
+            </button>
+            {onSignOut && (
+              <button
+                onClick={onSignOut}
+                title="Sign out"
+                className="md:hidden text-zinc-400 hover:text-white p-1.5 rounded-lg hover:bg-zinc-800 transition-colors"
+              >
+                <LogOut className="w-5 h-5" />
+              </button>
+            )}
+          </div>
         )}
       </div>
 
@@ -165,6 +179,15 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <Database className="w-3.5 h-3.5 text-blue-400" />
               <span>{sheetMetadata.isDemoMode ? 'Connect OAuth' : 'Settings'}</span>
             </button>
+            {onSignOut && (
+              <button
+                onClick={() => onSignOut()}
+                title="Sign out"
+                className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg border border-zinc-700 transition-colors"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+              </button>
+            )}
             <a
               href={`https://docs.google.com/spreadsheets/d/${sheetMetadata.spreadsheetId}/edit`}
               target="_blank"

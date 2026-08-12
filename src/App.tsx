@@ -8,7 +8,6 @@ import {
 import {
   DEFAULT_SPREADSHEET_ID,
   DEFAULT_HEADERS,
-  INITIAL_DEMO_LEADS,
   syncOrCreateGoogleSheet,
   syncGoogleSheetData,
   appendRowToSheet,
@@ -16,6 +15,7 @@ import {
   appendHeaderColumn,
   clearRowInSheet,
 } from './services/googleSheets';
+import { googleSignIn, initAuth, googleSignOut } from './services/googleAuth';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { FunnelMetricsCards } from './components/FunnelMetricsCards';
@@ -31,7 +31,7 @@ import { CheckCircle2, X } from 'lucide-react';
 
 export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('table');
-  const [leads, setLeads] = useState<Lead[]>(INITIAL_DEMO_LEADS);
+  const [leads, setLeads] = useState<Lead[]>([]);
   const [headers, setHeaders] = useState<string[]>(DEFAULT_HEADERS);
   const [sheetMetadata, setSheetMetadata] = useState<SheetMetadata>({
     spreadsheetId: DEFAULT_SPREADSHEET_ID,
@@ -39,11 +39,12 @@ export default function App() {
     sheetName: 'Sheet1',
     headers: DEFAULT_HEADERS,
     lastSynced: new Date(),
-    isDemoMode: true,
+    isDemoMode: false,
     autoSyncInterval: 30,
   });
   const [oauthToken, setOauthToken] = useState<string>('');
   const [isLoading, setIsLoading] = useState<boolean>(false);
+  const [currentUser, setCurrentUser] = useState<any | null>(null);
 
   // Filter state
   const [filterState, setFilterState] = useState<FilterState>({
@@ -87,7 +88,7 @@ export default function App() {
           sheetName: savedTab || prev.sheetName,
           isDemoMode: false,
         }));
-        handleSyncWithGoogle(savedSheetId, savedToken, savedTab || undefined);
+        // only attempt sync if user is signed in; initAuth will call onAuthSuccess if available
       } else {
         const savedLeads = localStorage.getItem('salesflow_leads_state');
         const savedHeaders = localStorage.getItem('salesflow_headers_state');
@@ -103,6 +104,28 @@ export default function App() {
     }
   }, []);
 
+  // Initialize Firebase auth listener to track sign-in state
+  useEffect(() => {
+    const unsubscribe = initAuth(
+      (user, token) => {
+        setCurrentUser(user);
+        if (token) {
+          setOauthToken(token);
+          try {
+            localStorage.setItem('google_sheets_token', token);
+          } catch (e) {}
+        }
+      },
+      () => {
+        setCurrentUser(null);
+        setOauthToken('');
+      }
+    );
+    return () => {
+      if (typeof unsubscribe === 'function') unsubscribe();
+    };
+  }, []);
+
   // Persist demo changes locally
   const persistState = (newLeads: Lead[], newHeaders: string[]) => {
     try {
@@ -114,6 +137,40 @@ export default function App() {
     } catch (e) {
       // ignore
     }
+  };
+
+  const handleSignIn = async () => {
+    try {
+      setIsLoading(true);
+      const result = await googleSignIn();
+      if (result) {
+        setCurrentUser(result.user);
+        setOauthToken(result.accessToken);
+        try {
+          localStorage.setItem('google_sheets_token', result.accessToken);
+        } catch (e) {}
+        // optionally sync if spreadsheet id present
+        const savedSheetId = localStorage.getItem('google_spreadsheet_id');
+        if (savedSheetId) {
+          await handleSyncWithGoogle(savedSheetId, result.accessToken);
+        }
+      }
+    } catch (err: any) {
+      showToast(err.message || 'Sign in failed');
+    } finally {
+      setIsLoading(false);
+    }
+  };
+
+  const handleSignOut = async () => {
+    try {
+      await googleSignOut();
+    } catch (e) {}
+    setCurrentUser(null);
+    setOauthToken('');
+    try {
+      localStorage.removeItem('google_sheets_token');
+    } catch (e) {}
   };
 
   // Sync from live Google Sheet or auto-create in Google Drive
@@ -405,6 +462,26 @@ export default function App() {
     return String(Math.max(...numVals) + 1);
   }, [leads]);
 
+  // Require sign-in for production usage: show simple sign-in page when not authenticated
+  if (!currentUser) {
+    return (
+      <div className="flex items-center justify-center h-screen w-full bg-[#0A0A0B] text-[#E4E4E7]">
+        <div className="w-full max-w-md p-6 bg-zinc-900 rounded-lg border border-zinc-800">
+          <h1 className="text-2xl font-bold mb-4">SalesFlow Pro</h1>
+          <p className="text-zinc-400 mb-6">Sign in with Google to access your dashboard and sheets.</p>
+          <button
+            onClick={handleSignIn}
+            disabled={isLoading}
+            className="w-full bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-white font-medium"
+          >
+            {isLoading ? 'Signing in...' : 'Sign in with Google'}
+          </button>
+          <p className="text-xs text-zinc-500 mt-4">Hosted on sales.dcodeinteriors.com — make sure this domain is added to Firebase Authorized domains.</p>
+        </div>
+      </div>
+    );
+  }
+
   return (
     <div className="flex h-screen w-full bg-[#0A0A0B] text-[#E4E4E7] overflow-hidden select-none">
       {/* Left Navigation Sidebar */}
@@ -423,6 +500,7 @@ export default function App() {
         isLoading={isLoading}
         isOpenMobile={isMobileMenuOpen}
         onCloseMobile={() => setIsMobileMenuOpen(false)}
+        onSignOut={handleSignOut}
       />
 
       {/* Main Content Area */}

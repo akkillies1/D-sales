@@ -6,11 +6,28 @@ import {
   onAuthStateChanged,
   signOut,
   User,
+  connectAuthEmulator,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+
+// Connect to the Firebase Auth emulator when running locally during development.
+// Control via VITE_USE_FIREBASE_EMULATOR=true in your .env for explicit opt-in.
+try {
+  const useEmulator = (typeof import.meta !== 'undefined' && (import.meta as any).env && (import.meta as any).env.VITE_USE_FIREBASE_EMULATOR === 'true')
+    || (typeof window !== 'undefined' && (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1'));
+
+  if (useEmulator) {
+    // Emulator URL is the default for the Firebase CLI: http://localhost:9099
+    connectAuthEmulator(auth, 'http://localhost:9099', { disableWarnings: true });
+    // eslint-disable-next-line no-console
+    console.info('Connected Firebase Auth to emulator at http://localhost:9099');
+  }
+} catch (e) {
+  // ignore if connectAuthEmulator is not available or fails
+}
 
 const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
