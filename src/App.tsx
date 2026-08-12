@@ -126,6 +126,22 @@ export default function App() {
     };
   }, []);
 
+  // When signed in and we have a saved spreadsheet id + token, auto-sync once
+  useEffect(() => {
+    const tryAutoSync = async () => {
+      try {
+        const savedSheetId = localStorage.getItem('google_spreadsheet_id');
+        if (currentUser && oauthToken && savedSheetId) {
+          await handleSyncWithGoogle(savedSheetId, oauthToken, localStorage.getItem('google_sheet_tab') || undefined);
+        }
+      } catch (e) {
+        // ignore
+      }
+    };
+    tryAutoSync();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [currentUser, oauthToken]);
+
   // Persist demo changes locally
   const persistState = (newLeads: Lead[], newHeaders: string[]) => {
     try {
@@ -466,8 +482,8 @@ export default function App() {
   if (!currentUser) {
     return (
       <div className="flex items-center justify-center h-screen w-full bg-[#0A0A0B] text-[#E4E4E7]">
-        <div className="w-full max-w-md p-6 bg-zinc-900 rounded-lg border border-zinc-800">
-          <h1 className="text-2xl font-bold mb-4">SalesFlow Pro</h1>
+    <div className="w-full max-w-md p-6 bg-zinc-900 rounded-lg border border-zinc-800">
+          <h1 className="text-2xl font-bold mb-4">D-sales Pro</h1>
           <p className="text-zinc-400 mb-6">Sign in with Google to access your dashboard and sheets.</p>
           <button
             onClick={handleSignIn}
@@ -476,7 +492,7 @@ export default function App() {
           >
             {isLoading ? 'Signing in...' : 'Sign in with Google'}
           </button>
-          <p className="text-xs text-zinc-500 mt-4">Hosted on sales.dcodeinteriors.com — make sure this domain is added to Firebase Authorized domains.</p>
+          <p className="text-xs text-zinc-500 mt-4">Powered by dcode private ltd • <a href="/privacy" className="underline">Privacy</a> • <a href="/cookies" className="underline">Cookies</a></p>
         </div>
       </div>
     );
