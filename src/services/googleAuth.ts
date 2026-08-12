@@ -7,11 +7,22 @@ import {
   signOut,
   User,
   connectAuthEmulator,
+  setPersistence,
+  browserLocalPersistence,
 } from 'firebase/auth';
 import firebaseConfig from '../../firebase-applet-config.json';
 
 const app = !getApps().length ? initializeApp(firebaseConfig) : getApp();
 export const auth = getAuth(app);
+
+// Persist auth state in local storage so session survives hard refreshes
+try {
+  setPersistence(auth, browserLocalPersistence).catch(() => {
+    // ignore persistence errors in environments that do not support it
+  });
+} catch (e) {
+  // ignore
+}
 
 // Connect to the Firebase Auth emulator when running locally during development.
 // Control via VITE_USE_FIREBASE_EMULATOR=true in your .env for explicit opt-in.
@@ -87,6 +98,10 @@ export const googleSignIn = async (): Promise<{
     }
     if (error?.code === 'auth/cancelled-popup-request') {
       throw new Error('Sign-in request was cancelled.');
+    }
+    // Google returns access_denied when OAuth consent verification blocks the app
+    if (error?.message && String(error.message).includes('access_denied')) {
+      throw new Error('Google verification required: this app has not completed OAuth verification. Please contact the site administrator.');
     }
     if (error?.code === 'auth/unauthorized-domain') {
       throw new Error('This domain is not authorized in Firebase. You can paste an OAuth token manually below.');
