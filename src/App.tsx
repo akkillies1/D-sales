@@ -18,6 +18,7 @@ import {
 import { googleSignIn, initAuth, googleSignOut } from './services/googleAuth';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import Landing from './components/Landing';
 import { FunnelMetricsCards } from './components/FunnelMetricsCards';
 import { LeadTable } from './components/LeadTable';
 import { FunnelKanban } from './components/FunnelKanban';
@@ -478,24 +479,9 @@ export default function App() {
     return String(Math.max(...numVals) + 1);
   }, [leads]);
 
-  // Require sign-in for production usage: show simple sign-in page when not authenticated
+  // Require sign-in for production usage: show marketing / sign-in page when not authenticated
   if (!currentUser) {
-    return (
-      <div className="flex items-center justify-center h-screen w-full bg-[#0A0A0B] text-[#E4E4E7]">
-    <div className="w-full max-w-md p-6 bg-zinc-900 rounded-lg border border-zinc-800">
-          <h1 className="text-2xl font-bold mb-4">D-sales Pro</h1>
-          <p className="text-zinc-400 mb-6">Sign in with Google to access your dashboard and sheets.</p>
-          <button
-            onClick={handleSignIn}
-            disabled={isLoading}
-            className="w-full bg-blue-600 hover:bg-blue-500 px-4 py-2 rounded-lg text-white font-medium"
-          >
-            {isLoading ? 'Signing in...' : 'Sign in with Google'}
-          </button>
-          <p className="text-xs text-zinc-500 mt-4">Powered by dcode private ltd • <a href="/privacy" className="underline">Privacy</a> • <a href="/cookies" className="underline">Cookies</a></p>
-        </div>
-      </div>
-    );
+    return <Landing onSignIn={handleSignIn} isLoading={isLoading} />;
   }
 
   return (
