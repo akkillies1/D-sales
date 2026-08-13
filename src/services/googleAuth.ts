@@ -46,8 +46,11 @@ const provider = new GoogleAuthProvider();
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
 provider.addScope('https://www.googleapis.com/auth/drive.file');
 provider.addScope('https://www.googleapis.com/auth/drive.readonly');
+// Request explicit consent and include granted scopes so Drive permissions are granted.
 provider.setCustomParameters({
-  prompt: 'select_account',
+  prompt: 'consent',
+  access_type: 'offline',
+  include_granted_scopes: 'true',
 });
 
 let isSigningIn = false;
@@ -67,6 +70,16 @@ export const initAuth = (
           cachedAccessToken = token;
           try {
             localStorage.setItem('google_sheets_token', token);
+          } catch (e) {}
+          // If a pending_connect was saved before redirect, process it
+          try {
+            const pending = localStorage.getItem('pending_connect');
+            if (pending) {
+              const p = JSON.parse(pending);
+              // store a flag so the app can pick this up and call the connector
+              localStorage.setItem('pending_connect_processed', JSON.stringify({ ...p, token }));
+              localStorage.removeItem('pending_connect');
+            }
           } catch (e) {}
           if (result?.user && onAuthSuccess) {
             onAuthSuccess(result.user as User, token);

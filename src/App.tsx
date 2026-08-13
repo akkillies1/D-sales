@@ -132,6 +132,21 @@ export default function App() {
   useEffect(() => {
     const tryAutoSync = async () => {
       try {
+        // If redirect sign-in completed with a pending connect, handle it first
+        const pendingProcessed = localStorage.getItem('pending_connect_processed');
+        if (pendingProcessed) {
+          try {
+            const p = JSON.parse(pendingProcessed);
+            if (p && p.sheetId && p.token) {
+              await handleSyncWithGoogle(p.sheetId, p.token, p.selectedTab || undefined);
+              localStorage.removeItem('pending_connect_processed');
+              return;
+            }
+          } catch (e) {
+            // ignore
+          }
+        }
+
         const savedSheetId = localStorage.getItem('google_spreadsheet_id');
         if (currentUser && oauthToken && savedSheetId) {
           await handleSyncWithGoogle(savedSheetId, oauthToken, localStorage.getItem('google_sheet_tab') || undefined);

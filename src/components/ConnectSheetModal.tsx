@@ -79,17 +79,15 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      const res = await googleSignIn();
-      if (!res || !res.accessToken) {
-        throw new Error('Could not obtain Google OAuth token');
-      }
-      setTokenInput(res.accessToken);
       const cleanId = extractSpreadsheetId(sheetId || DEFAULT_SPREADSHEET_ID);
-      await onConnectToken(cleanId, res.accessToken, selectedTab);
-      setSuccessMsg('Successfully connected and synced with your Google Sheet!');
-      setTimeout(() => {
-        onClose();
-      }, 1500);
+      // Save pending connect request to localStorage so it can be completed after redirect
+      try {
+        localStorage.setItem('pending_connect', JSON.stringify({ sheetId: cleanId, selectedTab }));
+      } catch (e) {}
+      // Trigger redirect sign-in flow; the app will process pending_connect after redirect
+      await googleSignIn();
+      // signInWithRedirect will navigate away; if it returns, inform the user
+      setSuccessMsg('Redirecting to Google for sign-in...');
     } catch (err: any) {
       setErrorMsg(
         err.message ||
