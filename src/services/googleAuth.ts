@@ -119,9 +119,22 @@ export const googleSignOut = async (): Promise<void> => {
 };
 
 export const getAccessToken = (): string | null => {
-  return cachedAccessToken;
+  if (cachedAccessToken) return cachedAccessToken;
+  try {
+    const stored = localStorage.getItem('google_sheets_token');
+    if (stored) {
+      cachedAccessToken = stored;
+      return stored;
+    }
+  } catch (e) {
+    // ignore
+  }
+  return null;
 };
 
 export const setAccessTokenManual = (token: string): void => {
   cachedAccessToken = token;
+  try {
+    localStorage.setItem('google_sheets_token', token);
+  } catch (e) {}
 };
