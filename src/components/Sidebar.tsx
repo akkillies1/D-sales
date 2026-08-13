@@ -1,5 +1,7 @@
 import React from 'react';
 import { ActiveTab, SheetMetadata } from '../types';
+import ContactModal from './ContactModal';
+import { useState } from 'react';
 import { SUPPORT_PHONE_LINK, WHATSAPP_LINK } from '../config';
 import {
   LayoutDashboard,
@@ -36,6 +38,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
   onCloseMobile,
   onSignOut,
 }) => {
+  const [isContactOpen, setIsContactOpen] = useState(false);
   const navItems: { id: ActiveTab; label: string; icon: React.ReactNode }[] = [
     {
       id: 'table',
@@ -101,7 +104,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
               <span>WhatsApp</span>
             </a>
           )}
+          <button onClick={() => setIsContactOpen(true)} className="ml-2 text-xs text-zinc-300 px-3 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700">Contact</button>
         </div>
+        {isContactOpen && <ContactModal isOpen={isContactOpen} onClose={() => setIsContactOpen(false)} />}
         </div>
         {onCloseMobile && (
           <div className="flex items-center space-x-2">

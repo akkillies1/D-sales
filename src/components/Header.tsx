@@ -1,6 +1,8 @@
 import React from 'react';
 import { Plus, Columns, Search, RefreshCw, Filter, ShieldCheck, Menu } from 'lucide-react';
 import { SUPPORT_PHONE_LINK, WHATSAPP_LINK } from '../config';
+import ContactModal from './ContactModal';
+import { useState } from 'react';
 import { FilterState } from '../types';
 
 interface HeaderProps {
@@ -28,6 +30,7 @@ export const Header: React.FC<HeaderProps> = ({
   isDemoMode,
   onToggleMobileMenu,
 }) => {
+  const [isContactOpen, setIsContactOpen] = useState(false);
   return (
     <header className="mb-6 space-y-4">
       {/* Top bar */}
@@ -105,6 +108,7 @@ export const Header: React.FC<HeaderProps> = ({
           {WHATSAPP_LINK && (
             <a href={WHATSAPP_LINK} target="_blank" rel="noopener noreferrer" className="md:hidden ml-2 text-xs text-white px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">WhatsApp</a>
           )}
+          <button onClick={() => setIsContactOpen(true)} className="md:hidden ml-2 text-xs text-zinc-300 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700">Contact</button>
         </div>
       </div>
 
