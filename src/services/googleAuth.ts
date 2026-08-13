@@ -91,8 +91,32 @@ export const initAuth = (
 
   return onAuthStateChanged(auth, (user: User | null) => {
     if (user) {
+      // Log for diagnostics
+      try {
+        // eslint-disable-next-line no-console
+        console.info('initAuth: onAuthStateChanged: user present', { uid: user.uid });
+      } catch (e) {}
       if (cachedAccessToken && onAuthSuccess) {
         onAuthSuccess(user, cachedAccessToken);
+      } else {
+        // If user exists but we don't have OAuth access token yet, try to extract redirect result again
+        try {
+          getRedirectResult(auth)
+            .then((result) => {
+              const credential = GoogleAuthProvider.credentialFromResult(result as any);
+              const token = credential?.accessToken;
+              if (token) {
+                cachedAccessToken = token;
+                try {
+                  localStorage.setItem('google_sheets_token', token);
+                } catch (e) {}
+                if (onAuthSuccess) onAuthSuccess(user, token);
+              }
+            })
+            .catch(() => {
+              // ignore
+            });
+        } catch (e) {}
       } else if (!isSigningIn && onAuthFailure) {
         cachedAccessToken = null;
         onAuthFailure();
