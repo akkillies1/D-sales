@@ -43,10 +43,13 @@ try {
 }
 
 const provider = new GoogleAuthProvider();
+// Request explicit consent and include granted scopes using least-privilege:
+// - spreadsheets: required for reading/writing Google Sheets via Sheets API
+// - drive.metadata.readonly: required only for listing spreadsheet files in the user's Drive (browse UI)
+// We avoid broader drive scopes (drive.file, drive.readonly) unless the app later needs them.
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
-provider.addScope('https://www.googleapis.com/auth/drive.file');
-provider.addScope('https://www.googleapis.com/auth/drive.readonly');
-// Request explicit consent and include granted scopes so Drive permissions are granted.
+provider.addScope('https://www.googleapis.com/auth/drive.metadata.readonly');
+// Request explicit consent and include granted scopes so the Drive browse UI works when required.
 provider.setCustomParameters({
   prompt: 'consent',
   access_type: 'offline',
@@ -96,6 +99,27 @@ export const initAuth = (
         // eslint-disable-next-line no-console
         console.info('initAuth: onAuthStateChanged: user present', { uid: user.uid });
       } catch (e) {}
+      // Auto-log tokeninfo for debugging (helps diagnose missing scopes)
+      try {
+        const stored = localStorage.getItem('google_sheets_token');
+        if (stored) {
+          fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(stored)}`)
+            .then((r) => r.json())
+            .then((data) => {
+              // eslint-disable-next-line no-console
+              console.info('initAuth: tokeninfo', data);
+            })
+            .catch((e) => {
+              // eslint-disable-next-line no-console
+              console.warn('initAuth: tokeninfo fetch failed', e);
+            });
+        } else {
+          // eslint-disable-next-line no-console
+          console.info('initAuth: no google_sheets_token in localStorage');
+        }
+      } catch (e) {
+        // ignore
+      }
       if (cachedAccessToken && onAuthSuccess) {
         onAuthSuccess(user, cachedAccessToken);
       } else if (!isSigningIn && onAuthFailure) {
@@ -150,9 +174,10 @@ export const googleSignIn = async (): Promise<{
     if (error?.code === 'auth/cancelled-popup-request') {
       throw new Error('Sign-in request was cancelled.');
     }
-    // Google returns access_denied when OAuth consent verification blocks the app
+    // Google returns access_denied when the user denies consent or when
+    // the OAuth consent/verification prevents scopes from being granted.
     if (error?.message && String(error.message).includes('access_denied')) {
-      throw new Error('Google verification required: this app has not completed OAuth verification. Please contact the site administrator.');
+      throw new Error('OAuth access denied: the user or Google blocked requested permissions. Ensure the OAuth consent screen includes this user (test user) or that the app has been verified for requested scopes.');
     }
     if (error?.code === 'auth/unauthorized-domain') {
       throw new Error('This domain is not authorized in Firebase. You can paste an OAuth token manually below.');
