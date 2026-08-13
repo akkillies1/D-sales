@@ -63,11 +63,13 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
-  // Process redirect result if present (for signInWithRedirect flow)
+  // Ensure getRedirectResult is processed exactly once and avoid race with onAuthStateChanged.
+  let redirectProcessing = true;
+
   getRedirectResult(auth)
     .then((result) => {
       const credential = GoogleAuthProvider.credentialFromResult(result as any);
-      const token = credential?.accessToken;
+      const token = credential?.accessToken ?? null;
       if (token) {
         cachedAccessToken = token;
         try {
@@ -83,69 +85,54 @@ export const initAuth = (
             localStorage.removeItem('pending_connect');
           }
         } catch (e) {}
-        if (result?.user && onAuthSuccess) {
-          onAuthSuccess(result.user as User, token);
-        }
+      }
+
+      // Notify success if we have both a Firebase user in the result and an access token
+      if (result?.user && token && onAuthSuccess) {
+        onAuthSuccess(result.user as User, token);
       }
     })
-    .catch(() => {
-      // ignore redirect result errors here; onAuthStateChanged will handle auth state
+    .catch((err) => {
+      // Log redirect result errors for debugging in dev only
+      try {
+        // eslint-disable-next-line no-console
+        console.info('initAuth: getRedirectResult error', err && err.message ? err.message : err);
+      } catch (e) {}
+    })
+    .finally(() => {
+      redirectProcessing = false;
     });
 
   return onAuthStateChanged(auth, (user: User | null) => {
     if (user) {
-      // Log for diagnostics
+      // Log for diagnostics (do not print tokens)
       try {
         // eslint-disable-next-line no-console
         console.info('initAuth: onAuthStateChanged: user present', { uid: user.uid });
       } catch (e) {}
-      // Auto-log tokeninfo for debugging (helps diagnose missing scopes)
-      try {
-        const stored = localStorage.getItem('google_sheets_token');
-        if (stored) {
-          fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(stored)}`)
-            .then((r) => r.json())
-            .then((data) => {
-              // eslint-disable-next-line no-console
-              console.info('initAuth: tokeninfo', data);
-            })
-            .catch((e) => {
-              // eslint-disable-next-line no-console
-              console.warn('initAuth: tokeninfo fetch failed', e);
-            });
-        } else {
-          // eslint-disable-next-line no-console
-          console.info('initAuth: no google_sheets_token in localStorage');
-        }
-      } catch (e) {
-        // ignore
-      }
+
+      // If we already have a cached access token, report success immediately
       if (cachedAccessToken && onAuthSuccess) {
         onAuthSuccess(user, cachedAccessToken);
-      } else if (!isSigningIn && onAuthFailure) {
-        cachedAccessToken = null;
+        return;
+      }
+
+      // If redirect processing is still in-flight, wait for it to finish instead of
+      // assuming the user is unauthenticated. This avoids a race where onAuthStateChanged
+      // fires before getRedirectResult has populated the OAuth access token.
+      if (redirectProcessing) {
+        // still waiting for redirect result; do nothing now
+        return;
+      }
+
+      // Redirect processing finished and we do not have an OAuth access token.
+      // Call onAuthFailure so the app can show the connector flow, but this does
+      // NOT mean the Firebase user is signed out.
+      if (onAuthFailure) {
         onAuthFailure();
-      } else {
-        // If user exists but we don't have OAuth access token yet, try to extract redirect result again
-        try {
-          getRedirectResult(auth)
-            .then((result) => {
-              const credential = GoogleAuthProvider.credentialFromResult(result as any);
-              const token = credential?.accessToken;
-              if (token) {
-                cachedAccessToken = token;
-                try {
-                  localStorage.setItem('google_sheets_token', token);
-                } catch (e) {}
-                if (onAuthSuccess) onAuthSuccess(user, token);
-              }
-            })
-            .catch(() => {
-              // ignore
-            });
-        } catch (e) {}
       }
     } else {
+      // No Firebase user -> fully unauthenticated
       cachedAccessToken = null;
       if (onAuthFailure) {
         onAuthFailure();
