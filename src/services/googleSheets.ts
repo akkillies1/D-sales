@@ -727,10 +727,9 @@ export async function listDriveSpreadsheets(
   pageSize = 50,
   query = ''
 ): Promise<Array<{ id: string; name: string }>> {
-  const qName = query
-    ? `name contains '${encodeURIComponent(query)}' and `
-    : '';
-  const driveUrl = `https://www.googleapis.com/drive/v3/files?q=${qName}mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&pageSize=${pageSize}&fields=files(id,name)`;
+  const q = `${query ? `name contains '${query}' and ` : ''}mimeType='application/vnd.google-apps.spreadsheet' and trashed=false`;
+  const encodedQ = encodeURIComponent(q);
+  const driveUrl = `https://www.googleapis.com/drive/v3/files?q=${encodedQ}&pageSize=${pageSize}&fields=files(id,name)`;
 
   const res = await fetch(driveUrl, {
     headers: {
@@ -740,6 +739,17 @@ export async function listDriveSpreadsheets(
 
   if (!res.ok) {
     const text = await res.text();
+    // Provide a clearer message for unauthorized / insufficient scope
+    if (res.status === 403 || res.status === 401) {
+      let msg = `Drive API access denied (${res.status}).`;
+      try {
+        const err = JSON.parse(text);
+        if (err && err.error && err.error.message) msg += ` ${err.error.message}`;
+      } catch (e) {
+        // ignore JSON parse
+      }
+      throw new Error(msg + ' Ensure the token includes Drive scopes and the OAuth consent allows these scopes.');
+    }
     throw new Error(`Failed to list Drive files (${res.status}): ${text}`);
   }
 
