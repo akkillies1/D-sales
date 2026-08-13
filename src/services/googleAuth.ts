@@ -98,6 +98,9 @@ export const initAuth = (
       } catch (e) {}
       if (cachedAccessToken && onAuthSuccess) {
         onAuthSuccess(user, cachedAccessToken);
+      } else if (!isSigningIn && onAuthFailure) {
+        cachedAccessToken = null;
+        onAuthFailure();
       } else {
         // If user exists but we don't have OAuth access token yet, try to extract redirect result again
         try {
@@ -117,9 +120,6 @@ export const initAuth = (
               // ignore
             });
         } catch (e) {}
-      } else if (!isSigningIn && onAuthFailure) {
-        cachedAccessToken = null;
-        onAuthFailure();
       }
     } else {
       cachedAccessToken = null;
