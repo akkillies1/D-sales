@@ -18,6 +18,7 @@ import {
 import { googleSignIn, initAuth, googleSignOut } from './services/googleAuth';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
+import { SUPPORT_PHONE_LINK, WHATSAPP_LINK } from './config';
 import Landing from './components/Landing';
 import { FunnelMetricsCards } from './components/FunnelMetricsCards';
 import { LeadTable } from './components/LeadTable';
@@ -504,6 +505,16 @@ export default function App() {
         onCloseMobile={() => setIsMobileMenuOpen(false)}
         onSignOut={handleSignOut}
       />
+
+      {/* Floating contact buttons for desktop */}
+      <div className="hidden md:flex flex-col fixed right-6 bottom-6 z-50 space-y-3">
+        {SUPPORT_PHONE_LINK && (
+          <a href={SUPPORT_PHONE_LINK} className="bg-zinc-900 border border-zinc-800 text-zinc-200 px-3 py-2 rounded-lg shadow hover:bg-zinc-800">Call</a>
+        )}
+        {WHATSAPP_LINK && (
+          <a href={WHATSAPP_LINK} target="_blank" rel="noopener noreferrer" className="bg-emerald-600 text-white px-3 py-2 rounded-lg shadow hover:bg-emerald-500">WhatsApp</a>
+        )}
+      </div>
 
       {/* Main Content Area */}
       <main className="flex-1 flex flex-col p-3.5 sm:p-6 md:p-8 bg-[#0D0D0F] overflow-y-auto min-w-0">

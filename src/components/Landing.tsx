@@ -22,7 +22,7 @@ export const Landing: React.FC<LandingProps> = ({ onSignIn, isLoading }) => {
 
 		  <p className="text-zinc-400 max-w-xl">Connect your Google Sheet in one click and get a lightweight CRM with kanban, follow-ups, analytics and team sync. Built for speed and easy collaboration.</p>
 
-		  <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+			<div className="flex flex-col sm:flex-row sm:items-center gap-3">
 			<button
 			  onClick={onSignIn}
 			  disabled={isLoading}
@@ -31,8 +31,10 @@ export const Landing: React.FC<LandingProps> = ({ onSignIn, isLoading }) => {
 			  {isLoading ? 'Signing in...' : 'Sign in with Google'}
 			</button>
 
-			<a href="/privacy" className="text-sm text-zinc-400 hover:underline">Privacy</a>
-			<a href="/cookies" className="text-sm text-zinc-400 hover:underline">Cookies</a>
+			<div className="flex items-center gap-2">
+			  <a href="/privacy" className="text-sm text-zinc-400 hover:underline">Privacy</a>
+			  <a href="/cookies" className="text-sm text-zinc-400 hover:underline">Cookies</a>
+			</div>
 		  </div>
 
 		  <div className="mt-6 text-xs text-zinc-500">

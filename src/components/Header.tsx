@@ -1,5 +1,6 @@
 import React from 'react';
 import { Plus, Columns, Search, RefreshCw, Filter, ShieldCheck, Menu } from 'lucide-react';
+import { SUPPORT_PHONE_LINK, WHATSAPP_LINK } from '../config';
 import { FilterState } from '../types';
 
 interface HeaderProps {
@@ -96,6 +97,14 @@ export const Header: React.FC<HeaderProps> = ({
             <Plus className="w-4 h-4 mr-1.5" />
             <span>New Lead</span>
           </button>
+
+          {/* Contact buttons for mobile */}
+          {SUPPORT_PHONE_LINK && (
+            <a href={SUPPORT_PHONE_LINK} className="md:hidden ml-2 text-xs text-zinc-300 px-2 py-1 rounded-lg bg-zinc-800 hover:bg-zinc-700">Call</a>
+          )}
+          {WHATSAPP_LINK && (
+            <a href={WHATSAPP_LINK} target="_blank" rel="noopener noreferrer" className="md:hidden ml-2 text-xs text-white px-2 py-1 rounded-lg bg-emerald-600 hover:bg-emerald-500">WhatsApp</a>
+          )}
         </div>
       </div>
 
