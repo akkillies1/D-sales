@@ -68,7 +68,16 @@ export const initAuth = (
 
   getRedirectResult(auth)
     .then((result) => {
-      const credential = GoogleAuthProvider.credentialFromResult(result as any);
+      // result is null if this is not a redirect from Google auth (e.g., normal page load or returning from logout)
+      if (!result) {
+        try {
+          // eslint-disable-next-line no-console
+          console.info('initAuth: getRedirectResult returned null (not a redirect)');
+        } catch (e) {}
+        return;
+      }
+
+      const credential = GoogleAuthProvider.credentialFromResult(result);
       const token = credential?.accessToken ?? null;
       if (token) {
         cachedAccessToken = token;
@@ -88,8 +97,8 @@ export const initAuth = (
       }
 
       // Notify success if we have both a Firebase user in the result and an access token
-      if (result?.user && token && onAuthSuccess) {
-        onAuthSuccess(result.user as User, token);
+      if (result.user && token && onAuthSuccess) {
+        onAuthSuccess(result.user, token);
       }
     })
     .catch((err) => {
