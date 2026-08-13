@@ -58,6 +58,8 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
   const [isBrowsingDrive, setIsBrowsingDrive] = useState(false);
   const [driveFiles, setDriveFiles] = useState<Array<{ id: string; name: string }>>([]);
   const [driveQuery, setDriveQuery] = useState('');
+  const [tokenInfo, setTokenInfo] = useState<any | null>(null);
+  const [isLoadingTokenInfo, setIsLoadingTokenInfo] = useState(false);
 
   useEffect(() => {
     if (isOpen) {
@@ -95,6 +97,23 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
       );
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const handleShowTokenInfo = async () => {
+    setIsLoadingTokenInfo(true);
+    setTokenInfo(null);
+    setErrorMsg('');
+    try {
+      const token = tokenInput.trim() || getAccessToken();
+      if (!token) throw new Error('No access token available. Please sign in.');
+      const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
+      const data = await res.json();
+      setTokenInfo({ status: res.status, body: data });
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to fetch token info');
+    } finally {
+      setIsLoadingTokenInfo(false);
     }
   };
 
@@ -263,6 +282,25 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
             <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
+          {/* Token info debug */}
+          <div className="bg-zinc-900/60 p-3.5 rounded-xl border border-zinc-800">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <span className="text-xs font-bold text-zinc-200 block">Access Token Info</span>
+                <span className="text-[11px] text-zinc-400">Debug token scopes and expiry</span>
+              </div>
+              <div className="flex items-center gap-2">
+                <button onClick={handleShowTokenInfo} disabled={isLoadingTokenInfo} className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded">Check token</button>
+              </div>
+            </div>
+            {tokenInfo ? (
+              <div className="text-xs text-zinc-300 bg-black/40 p-2 rounded">
+                <pre className="whitespace-pre-wrap break-words">{JSON.stringify(tokenInfo, null, 2)}</pre>
+              </div>
+            ) : (
+              <div className="text-xs text-zinc-500">No token info loaded.</div>
+            )}
+          </div>
           {/* Drive Browser */}
           <div className="bg-zinc-900/60 p-3.5 rounded-xl border border-zinc-800">
             <div className="flex items-center justify-between mb-2">

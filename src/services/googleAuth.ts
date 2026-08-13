@@ -1,7 +1,9 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
-  signInWithPopup,
+  // signInWithPopup,
+  signInWithRedirect,
+  getRedirectResult,
   GoogleAuthProvider,
   onAuthStateChanged,
   signOut,
@@ -55,6 +57,26 @@ export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
   onAuthFailure?: () => void
 ) => {
+  // Process redirect result if present (for signInWithRedirect flow)
+  try {
+    getRedirectResult(auth)
+      .then((result) => {
+        const credential = GoogleAuthProvider.credentialFromResult(result as any);
+        const token = credential?.accessToken;
+        if (token) {
+          cachedAccessToken = token;
+          try {
+            localStorage.setItem('google_sheets_token', token);
+          } catch (e) {}
+          if (result?.user && onAuthSuccess) {
+            onAuthSuccess(result.user as User, token);
+          }
+        }
+      })
+      .catch(() => {
+        // ignore redirect result errors here; onAuthStateChanged will handle auth state
+      });
+
   return onAuthStateChanged(auth, (user: User | null) => {
     if (user) {
       if (cachedAccessToken && onAuthSuccess) {
@@ -78,17 +100,10 @@ export const googleSignIn = async (): Promise<{
 } | null> => {
   try {
     isSigningIn = true;
-    const result = await signInWithPopup(auth, provider);
-
-    const credential = GoogleAuthProvider.credentialFromResult(result);
-    if (!credential?.accessToken) {
-      throw new Error(
-        'Failed to get access token from Google sign-in. Please ensure third-party popups are allowed.'
-      );
-    }
-
-    cachedAccessToken = credential.accessToken;
-    return { user: result.user, accessToken: cachedAccessToken };
+    // Use redirect flow to avoid popup/COOP issues in some browsers / deployments
+    await signInWithRedirect(auth, provider);
+    // The redirect will leave the page; result will be processed on app load via getRedirectResult
+    return null;
   } catch (error: any) {
     if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')) {
       throw new Error('Sign-in popup was closed before completing authentication. Please click "Sign in with Google" to try again.');
