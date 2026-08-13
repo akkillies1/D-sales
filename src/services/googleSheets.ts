@@ -689,10 +689,10 @@ export async function syncOrCreateGoogleSheet(
     }
   }
 
-  // 2. Search user's Google Drive for existing "SalesFlow Pro Leads" spreadsheet
+  // 2. Search user's Google Drive for existing "SalesFlow Pro Leads" spreadsheet (best-effort)
   try {
     const driveSearchUrl =
-      "https://www.googleapis.com/drive/v3/files?q=name='SalesFlow Pro Leads' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&orderBy=modifiedTime desc";
+      "https://www.googleapis.com/drive/v3/files?q=name='SalesFlow Pro Leads' and mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&orderBy=modifiedTime desc&pageSize=10";
     const searchRes = await fetch(driveSearchUrl, {
       headers: {
         Authorization: `Bearer ${accessToken}`,
@@ -714,9 +714,38 @@ export async function syncOrCreateGoogleSheet(
     // ignore and fall through
   }
 
-  // 3. Automatically create a new Google Sheet in user's Drive and sync it
-  const created = await createSampleSpreadsheet(accessToken, 'SalesFlow Pro Leads');
-  return await syncGoogleSheetData(created.spreadsheetId, accessToken, selectedTabName);
+  // If we reach here, no suitable spreadsheet was found. Do NOT automatically create one
+  // to avoid accidental overwrites. Let the UI prompt the user to create or select a sheet.
+  throw new Error('No existing spreadsheet found in Drive and no valid spreadsheet ID provided. Use "Create New Sheet" or paste/select an existing spreadsheet.');
+}
+
+/**
+ * List spreadsheets in the user's Drive (basic list for "Browse" UI)
+ */
+export async function listDriveSpreadsheets(
+  accessToken: string,
+  pageSize = 50,
+  query = ''
+): Promise<Array<{ id: string; name: string }>> {
+  const qName = query
+    ? `name contains '${encodeURIComponent(query)}' and `
+    : '';
+  const driveUrl = `https://www.googleapis.com/drive/v3/files?q=${qName}mimeType='application/vnd.google-apps.spreadsheet' and trashed=false&pageSize=${pageSize}&fields=files(id,name)`;
+
+  const res = await fetch(driveUrl, {
+    headers: {
+      Authorization: `Bearer ${accessToken}`,
+    },
+  });
+
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`Failed to list Drive files (${res.status}): ${text}`);
+  }
+
+  const data = await res.json();
+  const files = (data.files || []).map((f: any) => ({ id: f.id, name: f.name }));
+  return files;
 }
 
 /**

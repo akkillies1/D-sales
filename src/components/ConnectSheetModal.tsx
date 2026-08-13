@@ -17,6 +17,7 @@ import {
   DEFAULT_SPREADSHEET_ID,
   createSampleSpreadsheet,
   extractSpreadsheetId,
+  listDriveSpreadsheets,
 } from '../services/googleSheets';
 import { googleSignIn, getAccessToken } from '../services/googleAuth';
 
@@ -54,6 +55,9 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
   const [isCreatingSample, setIsCreatingSample] = useState(false);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
+  const [isBrowsingDrive, setIsBrowsingDrive] = useState(false);
+  const [driveFiles, setDriveFiles] = useState<Array<{ id: string; name: string }>>([]);
+  const [driveQuery, setDriveQuery] = useState('');
 
   useEffect(() => {
     if (isOpen) {
@@ -91,6 +95,39 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
       );
     } finally {
       setIsConnecting(false);
+    }
+  };
+
+  const handleBrowseDrive = async () => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    setIsBrowsingDrive(true);
+    try {
+      const token = tokenInput.trim() || getAccessToken();
+      if (!token) throw new Error('Please sign in with Google first to browse Drive');
+      const files = await listDriveSpreadsheets(token, 50, '');
+      setDriveFiles(files);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to list Drive files');
+    } finally {
+      setIsBrowsingDrive(false);
+    }
+  };
+
+  const handleDriveSelect = async (fileId: string) => {
+    setErrorMsg('');
+    setSuccessMsg('');
+    const token = tokenInput.trim() || getAccessToken();
+    if (!token) {
+      setErrorMsg('Please sign in with Google first');
+      return;
+    }
+    try {
+      await onConnectToken(fileId, token, selectedTab);
+      setSuccessMsg('Connected to selected spreadsheet');
+      setTimeout(() => onClose(), 1200);
+    } catch (err: any) {
+      setErrorMsg(err.message || 'Failed to connect to selected spreadsheet');
     }
   };
 
@@ -226,6 +263,38 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
             <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
+          {/* Drive Browser */}
+          <div className="bg-zinc-900/60 p-3.5 rounded-xl border border-zinc-800">
+            <div className="flex items-center justify-between mb-2">
+              <div>
+                <span className="text-xs font-bold text-zinc-200 block">Browse Google Drive</span>
+                <span className="text-[11px] text-zinc-400">Select a spreadsheet from your Drive</span>
+              </div>
+              <button
+                onClick={handleBrowseDrive}
+                disabled={isBrowsingDrive}
+                className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded"
+              >
+                {isBrowsingDrive ? 'Loading...' : 'Browse'}
+              </button>
+            </div>
+
+            {driveFiles.length > 0 ? (
+              <div className="max-h-36 overflow-auto text-xs space-y-2">
+                {driveFiles.map((f) => (
+                  <div key={f.id} className="flex items-center justify-between bg-black/40 px-3 py-2 rounded">
+                    <div className="truncate">{f.name}</div>
+                    <div className="flex items-center gap-2">
+                      <button onClick={() => { setSheetId(f.id); }} className="text-xs text-zinc-400 hover:text-white">Use ID</button>
+                      <button onClick={() => handleDriveSelect(f.id)} className="text-xs bg-blue-600 hover:bg-blue-500 text-white px-2 py-1 rounded">Connect</button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <div className="text-xs text-zinc-500">No files loaded yet. Click Browse to load spreadsheets from your Drive.</div>
+            )}
+          </div>
             <div>
               <h3 className="text-base font-bold text-zinc-100">
                 Google Sheet Integration
