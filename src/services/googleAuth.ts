@@ -61,34 +61,33 @@ export const initAuth = (
   onAuthFailure?: () => void
 ) => {
   // Process redirect result if present (for signInWithRedirect flow)
-  try {
-    getRedirectResult(auth)
-      .then((result) => {
-        const credential = GoogleAuthProvider.credentialFromResult(result as any);
-        const token = credential?.accessToken;
-        if (token) {
-          cachedAccessToken = token;
-          try {
-            localStorage.setItem('google_sheets_token', token);
-          } catch (e) {}
-          // If a pending_connect was saved before redirect, process it
-          try {
-            const pending = localStorage.getItem('pending_connect');
-            if (pending) {
-              const p = JSON.parse(pending);
-              // store a flag so the app can pick this up and call the connector
-              localStorage.setItem('pending_connect_processed', JSON.stringify({ ...p, token }));
-              localStorage.removeItem('pending_connect');
-            }
-          } catch (e) {}
-          if (result?.user && onAuthSuccess) {
-            onAuthSuccess(result.user as User, token);
+  getRedirectResult(auth)
+    .then((result) => {
+      const credential = GoogleAuthProvider.credentialFromResult(result as any);
+      const token = credential?.accessToken;
+      if (token) {
+        cachedAccessToken = token;
+        try {
+          localStorage.setItem('google_sheets_token', token);
+        } catch (e) {}
+        // If a pending_connect was saved before redirect, process it
+        try {
+          const pending = localStorage.getItem('pending_connect');
+          if (pending) {
+            const p = JSON.parse(pending);
+            // store a flag so the app can pick this up and call the connector
+            localStorage.setItem('pending_connect_processed', JSON.stringify({ ...p, token }));
+            localStorage.removeItem('pending_connect');
           }
+        } catch (e) {}
+        if (result?.user && onAuthSuccess) {
+          onAuthSuccess(result.user as User, token);
         }
-      })
-      .catch(() => {
-        // ignore redirect result errors here; onAuthStateChanged will handle auth state
-      });
+      }
+    })
+    .catch(() => {
+      // ignore redirect result errors here; onAuthStateChanged will handle auth state
+    });
 
   return onAuthStateChanged(auth, (user: User | null) => {
     if (user) {
