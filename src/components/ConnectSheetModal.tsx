@@ -280,6 +280,25 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
             <div className="w-9 h-9 rounded-xl bg-blue-600/20 border border-blue-500/30 flex items-center justify-center text-blue-400">
               <FileSpreadsheet className="w-5 h-5" />
             </div>
+            <div>
+              <h3 className="text-base font-bold text-zinc-100">
+                Google Sheet Integration
+              </h3>
+              <p className="text-xs text-zinc-400">
+                Live 2-way sync with your Google Spreadsheet
+              </p>
+            </div>
+          </div>
+          <button
+            onClick={onClose}
+            className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
+          >
+            <X className="w-5 h-5" />
+          </button>
+        </div>
+
+        {/* Body */}
+        <div className="p-6 space-y-5 overflow-y-auto text-sm">
           {/* Token info debug */}
           <div className="bg-zinc-900/60 p-3.5 rounded-xl border border-zinc-800">
             <div className="flex items-center justify-between mb-2">
@@ -331,25 +350,6 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
               <div className="text-xs text-zinc-500">No files loaded yet. Click Browse to load spreadsheets from your Drive.</div>
             )}
           </div>
-            <div>
-              <h3 className="text-base font-bold text-zinc-100">
-                Google Sheet Integration
-              </h3>
-              <p className="text-xs text-zinc-400">
-                Live 2-way sync with your Google Spreadsheet
-              </p>
-            </div>
-          </div>
-          <button
-            onClick={onClose}
-            className="text-zinc-400 hover:text-white p-1 rounded-lg hover:bg-zinc-800 transition-colors"
-          >
-            <X className="w-5 h-5" />
-          </button>
-        </div>
-
-        {/* Content */}
-        <div className="p-6 space-y-5 overflow-y-auto text-sm">
           {/* Target Spreadsheet Box & Tab Selector */}
           <div className="bg-zinc-900/80 p-4 rounded-xl border border-zinc-800 space-y-3">
             <div className="flex items-center justify-between text-xs">
