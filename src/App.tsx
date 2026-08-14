@@ -875,7 +875,7 @@ export default function App() {
       </div>
 
       {/* Main Content Area */}
-      <main className="flex-1 flex flex-col p-3.5 sm:p-6 md:p-8 bg-[#0D0D0F] overflow-y-auto min-w-0">
+      <main className="flex-1 flex flex-col p-3.5 sm:p-6 md:p-8 bg-[#0D0D0F] overflow-y-auto min-w-0 w-full">
         <Header
           totalLeadsCount={leads.length}
           placesCount={uniquePlaces}

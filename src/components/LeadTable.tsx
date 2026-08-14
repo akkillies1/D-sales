@@ -90,9 +90,9 @@ export const LeadTable: React.FC<LeadTableProps> = ({
   };
 
   return (
-    <div className="flex-1 glass rounded-2xl overflow-hidden flex flex-col border border-zinc-800/80 shadow-2xl">
-      <div className="overflow-x-auto h-full">
-        <table className="w-full text-left border-collapse">
+    <div className="flex-1 glass rounded-2xl overflow-hidden flex flex-col border border-zinc-800/80 shadow-2xl min-w-0">
+      <div className="overflow-x-auto h-full min-w-0">
+        <table className="w-full text-left border-collapse min-w-[900px]">
           <thead className="bg-zinc-900/80 text-[11px] uppercase text-zinc-500 font-bold border-b border-zinc-800 tracking-wider">
             <tr>
               <th className="px-5 py-4 w-12 text-center">Sl</th>

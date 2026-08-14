@@ -94,9 +94,9 @@ export const FollowUpView: React.FC<FollowUpViewProps> = ({
   ).length;
 
   return (
-    <div className="space-y-6">
+    <div className="space-y-6 min-w-0">
       {/* Top filter tabs & completed toggle */}
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-900/60 p-3.5 rounded-2xl border border-zinc-800">
+      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 bg-zinc-900/60 p-3.5 rounded-2xl border border-zinc-800 w-full min-w-0">
         <div className="flex flex-wrap items-center gap-2">
           <button
             onClick={() => setFilter('all')}

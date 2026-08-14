@@ -181,9 +181,9 @@ export const FunnelKanban: React.FC<FunnelKanbanProps> = ({
   };
 
   return (
-    <div className="flex-1 flex flex-col space-y-4 min-h-0">
+    <div className="flex-1 flex flex-col space-y-4 min-h-0 min-w-0">
       {/* Top Controls Bar */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-900/70 p-3 rounded-2xl border border-zinc-800/80">
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3 bg-zinc-900/70 p-3 rounded-2xl border border-zinc-800/80 w-full">
         <div className="flex flex-wrap items-center gap-2">
           <span className="text-xs text-zinc-400 font-semibold flex items-center mr-1">
             <Filter className="w-3.5 h-3.5 mr-1 text-zinc-500" /> Filter Stage:
@@ -242,7 +242,7 @@ export const FunnelKanban: React.FC<FunnelKanbanProps> = ({
       </div>
 
       {/* Column Pipeline Grid */}
-      <div className="flex-1 overflow-x-auto pb-4">
+      <div className="flex-1 overflow-x-auto pb-4 min-w-0">
         <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-5 gap-4 min-w-[1200px] h-full items-start">
           {stages.map((stage) => {
             const columnLeads = filteredLeads.filter(stage.matchFn);
