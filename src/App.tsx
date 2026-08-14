@@ -482,6 +482,19 @@ export default function App() {
       const result = await syncOrCreateGoogleSheet(spreadsheetId, verifiedToken, selectedTabName, customMapping, headerRowIdx);
       setLeads(result.leads);
       setHeaders(result.headers);
+      // Persist custom mapping and header row selection so future syncs use them
+      setSheetMetadata((prev) => ({
+        ...prev,
+        customColumnMapping: customMapping || prev.customColumnMapping,
+        headerRowIdx: typeof headerRowIdx === 'number' ? headerRowIdx : prev.headerRowIdx,
+        lastSynced: new Date(),
+      }));
+      try {
+        if (currentUser?.uid) {
+          if (customMapping) localStorage.setItem(`google_custom_mapping_${currentUser.uid}`, JSON.stringify(customMapping));
+          if (typeof headerRowIdx === 'number') localStorage.setItem(`google_sheet_header_row_${currentUser.uid}`, String(headerRowIdx));
+        }
+      } catch (e) {}
       // Use central setter to ensure all checks occur
       setConnectedSpreadsheet({
         firebaseUid: currentUser?.uid ?? null,
