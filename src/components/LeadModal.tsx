@@ -655,7 +655,7 @@ export const LeadModal: React.FC<LeadModalProps> = ({
               Cancel
             </button>
             <button
-              onClick={handleSave}
+              type="submit"
               className="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 transition-all active:scale-95"
             >
               <Save className="w-4 h-4 inline-block mr-1.5" />
