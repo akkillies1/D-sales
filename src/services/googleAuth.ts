@@ -65,6 +65,8 @@ export const initAuth = (
 ) => {
   // Ensure getRedirectResult is processed exactly once and avoid race with onAuthStateChanged.
   let redirectProcessing = true;
+  let pendingUser: User | null = null;
+  let authStateFired = false;
 
   getRedirectResult(auth)
     .then((result) => {
@@ -110,9 +112,26 @@ export const initAuth = (
     })
     .finally(() => {
       redirectProcessing = false;
+      if (authStateFired) {
+        if (pendingUser) {
+          if (cachedAccessToken && onAuthSuccess) {
+            onAuthSuccess(pendingUser, cachedAccessToken);
+          } else if (onAuthSuccess) {
+            onAuthSuccess(pendingUser, '');
+          }
+        } else {
+          cachedAccessToken = null;
+          if (onAuthFailure) {
+            onAuthFailure();
+          }
+        }
+      }
     });
 
   return onAuthStateChanged(auth, (user: User | null) => {
+    authStateFired = true;
+    pendingUser = user;
+
     if (user) {
       // Log for diagnostics (do not print tokens)
       try {
