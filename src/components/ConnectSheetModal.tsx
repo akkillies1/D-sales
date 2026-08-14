@@ -18,6 +18,7 @@ import {
   extractSpreadsheetId,
   listDriveSpreadsheets,
   fetchSheetPreview,
+  buildHeaderMapping,
 } from '../services/googleSheets';
 import { googleSignIn, getAccessToken, verifyAndSetAccessToken, getGoogleUser, clearGoogleAuthState, assertGoogleAccountOwnership, auth } from '../services/googleAuth';
 
@@ -25,7 +26,7 @@ interface ConnectSheetModalProps {
   isOpen: boolean;
   onClose: () => void;
   sheetMetadata: SheetMetadata;
-  onConnectToken: (spreadsheetId: string, accessToken: string, selectedTab?: string) => Promise<void>;
+  onConnectToken: (spreadsheetId: string, accessToken: string, selectedTab?: string, customMapping?: Record<string,string>, headerRowIdx?: number) => Promise<void>;
   onSwitchToDemo: () => void;
   leads: Lead[];
   headers: string[];
@@ -55,6 +56,7 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
   const [isCreatingSample, setIsCreatingSample] = useState(false);
   const [isPreviewing, setIsPreviewing] = useState(false);
   const [previewData, setPreviewData] = useState<any | null>(null);
+  const [selectedHeaderIdx, setSelectedHeaderIdx] = useState<number | null>(null);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
@@ -548,7 +550,7 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
 
               {previewData && (
                 <div className="mt-3 bg-black/40 border border-zinc-800 rounded p-3 text-xs">
-                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center justify-between mb-2">
                     <div>
                       <div className="font-semibold text-zinc-200">Preview: {previewData.title} — {previewData.sheetName}</div>
                       <div className="text-zinc-400 text-[11px]">Detected header row: Row {previewData.headerRowIdx + 1} (confidence {Math.round(previewData.headerConfidence * 100)}%)</div>
@@ -563,25 +565,44 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
                     </div>
                   </div>
 
+                  {/* Header row selection */}
+                  <div className="flex items-center gap-2 mb-3">
+                    <label className="text-xs text-zinc-400">Header Row:</label>
+                    <select
+                      value={selectedHeaderIdx ?? previewData.headerRowIdx}
+                      onChange={(e) => setSelectedHeaderIdx(Number(e.target.value))}
+                      className="bg-black/60 border border-zinc-700 rounded-md px-2 py-1 text-xs text-zinc-200"
+                    >
+                      {(previewData.candidates || []).map((c: any) => (
+                        <option key={c.idx} value={c.idx} className="bg-zinc-900 text-zinc-200">Row {c.idx + 1}: {c.text}</option>
+                      ))}
+                    </select>
+                    <div className="text-xs text-zinc-500">Choose row that contains column headers</div>
+                  </div>
+
                   <div className="overflow-auto max-h-44">
                     <table className="w-full text-left text-[12px] border-collapse">
                       <thead>
                         <tr>
-                          {previewData.headers.map((h: string, i: number) => (
-                            <th key={i} className="px-2 py-1 border-b border-zinc-800 text-zinc-300">{h || '(empty)'}</th>
+                          {(selectedHeaderIdx !== null ? (previewData.rawRows[selectedHeaderIdx] || []) : previewData.headers).map((h: string, i: number) => (
+                            <th key={i} className="px-2 py-1 border-b border-zinc-800 text-zinc-300">{(h || '').trim() || '(empty)'}</th>
                           ))}
                         </tr>
                         <tr>
-                          {previewData.headers.map((h: string, i: number) => (
-                            <th key={i} className="px-2 py-1 border-b border-zinc-800 text-zinc-400 font-mono text-xs">{previewData.mappingSuggestions[h]?.suggestedKey || 'custom'} ({Math.round((previewData.mappingSuggestions[h]?.confidence||0)*100)}%)</th>
-                          ))}
+                          {(() => {
+                            const displayHeaders = selectedHeaderIdx !== null ? (previewData.rawRows[selectedHeaderIdx] || []).map((h: string) => (h || '').trim()) : previewData.headers;
+                            const mapping = buildHeaderMapping(displayHeaders);
+                            return displayHeaders.map((h: string, i: number) => (
+                              <th key={i} className="px-2 py-1 border-b border-zinc-800 text-zinc-400 font-mono text-xs">{mapping[h]?.suggestedKey || 'custom'} ({Math.round(((mapping[h]?.confidence)||0)*100)}%)</th>
+                            ));
+                          })()}
                         </tr>
                       </thead>
                       <tbody>
-                        {previewData.sample.slice(0,5).map((row: string[], ri: number) => (
+                        {((selectedHeaderIdx !== null ? previewData.rawRows.slice(selectedHeaderIdx + 1, selectedHeaderIdx + 1 + 10) : previewData.sample) || []).slice(0,5).map((row: string[], ri: number) => (
                           <tr key={ri} className="align-top">
-                            {previewData.headers.map((_: string, ci: number) => (
-                              <td key={ci} className="px-2 py-1 align-top text-zinc-300">{(row[ci] || '')}</td>
+                            {(selectedHeaderIdx !== null ? (previewData.rawRows[selectedHeaderIdx] || []) : previewData.headers).map((_: string, ci: number) => (
+                              <td key={ci} className="px-2 py-1 align-top text-zinc-300">{((row && row[ci]) || '')}</td>
                             ))}
                           </tr>
                         ))}
@@ -591,11 +612,13 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
 
                   <div className="mt-3 flex items-center justify-end space-x-2">
                     <button
-                      onClick={async () => {
+                        onClick={async () => {
                         // build custom mapping from suggestions and call connect
                         const mapping: Record<string,string> = {};
-                        for (const h of previewData.headers) {
-                          const s = previewData.mappingSuggestions[h];
+                        const displayHeaders = selectedHeaderIdx !== null ? (previewData.rawRows[selectedHeaderIdx] || []).map((h: string) => (h || '').trim()) : previewData.headers;
+                        const mappingSuggestions = buildHeaderMapping(displayHeaders);
+                        for (const h of displayHeaders) {
+                          const s = mappingSuggestions[h];
                           if (s && s.suggestedKey && s.confidence > 0.2) mapping[h] = s.suggestedKey;
                         }
                         let token = tokenInput.trim() || getAccessToken();
@@ -617,7 +640,7 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
                           return;
                         }
                         try {
-                          await onConnectToken(extractSpreadsheetId(sheetId.trim()), token, selectedTab, mapping);
+                          await onConnectToken(extractSpreadsheetId(sheetId.trim()), token, selectedTab, mapping, selectedHeaderIdx ?? previewData.headerRowIdx);
                           setPreviewData(null);
                           onClose();
                         } catch (err: any) {

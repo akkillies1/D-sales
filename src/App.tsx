@@ -454,7 +454,8 @@ export default function App() {
     spreadsheetId: string,
     token?: string,
     selectedTabName?: string,
-    customMapping?: Record<string, string>
+    customMapping?: Record<string, string>,
+    headerRowIdx?: number
   ): Promise<void> => {
     setIsLoading(true);
     try {
@@ -478,7 +479,7 @@ export default function App() {
         return;
       }
 
-      const result = await syncOrCreateGoogleSheet(spreadsheetId, verifiedToken, selectedTabName, customMapping);
+      const result = await syncOrCreateGoogleSheet(spreadsheetId, verifiedToken, selectedTabName, customMapping, headerRowIdx);
       setLeads(result.leads);
       setHeaders(result.headers);
       // Use central setter to ensure all checks occur
@@ -935,8 +936,8 @@ export default function App() {
         isOpen={isConnectModalOpen}
         onClose={() => setIsConnectModalOpen(false)}
         sheetMetadata={sheetMetadata}
-        onConnectToken={async (sheetId, token, selectedTab, customMapping) => {
-            await handleSyncWithGoogle(sheetId, token, selectedTab, customMapping);
+        onConnectToken={async (sheetId, token, selectedTab, customMapping, headerRowIdx) => {
+            await handleSyncWithGoogle(sheetId, token, selectedTab, customMapping, headerRowIdx);
           }}
         onSwitchToDemo={() => {
           setSheetMetadata((prev) => ({ ...prev, isDemoMode: true }));

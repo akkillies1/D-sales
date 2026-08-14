@@ -1,5 +1,6 @@
 import { Lead } from '../types';
 import { findBestFieldMatch } from './leadFields';
+import { normalizePhoneNumber } from '../utils/phone';
 
 // No global/default spreadsheet ID is defined here. Spreadsheets must be
 // explicitly connected per authenticated user and validated via the Sheets API.
@@ -76,7 +77,8 @@ export function parseDealValue(valStr: string | number | undefined): number {
  */
 export function convertRowsToLeads(
   rows: string[][],
-  customMapping?: Record<string, string>
+  customMapping?: Record<string, string>,
+  headerRowOverride?: number
 ): {
   headers: string[];
   leads: Lead[];
@@ -85,24 +87,28 @@ export function convertRowsToLeads(
     return { headers: DEFAULT_HEADERS, leads: [] };
   }
 
-  // Find the actual header row by looking for common header keywords
+  // Determine header row: prefer explicit override, otherwise detect heuristically
   let headerRowIdx = 0;
-  let maxScore = -1;
-  for (let r = 0; r < Math.min(rows.length, 5); r++) {
-    const row = rows[r] || [];
-    let score = 0;
-    const str = row.join(' ').toLowerCase();
-    if (str.includes('name') || str.includes('client')) score += 1;
-    if (str.includes('status') || str.includes('stage')) score += 1;
-    if (str.includes('date') || str.includes('time')) score += 1;
-    if (str.includes('contact') || str.includes('phone')) score += 1;
-    if (score > maxScore) {
-      maxScore = score;
-      headerRowIdx = r;
+  if (typeof headerRowOverride === 'number' && headerRowOverride >= 0 && headerRowOverride < rows.length) {
+    headerRowIdx = headerRowOverride;
+  } else {
+    let maxScore = -1;
+    for (let r = 0; r < Math.min(rows.length, 5); r++) {
+      const row = rows[r] || [];
+      let score = 0;
+      const str = row.join(' ').toLowerCase();
+      if (str.includes('name') || str.includes('client')) score += 1;
+      if (str.includes('status') || str.includes('stage')) score += 1;
+      if (str.includes('date') || str.includes('time')) score += 1;
+      if (str.includes('contact') || str.includes('phone')) score += 1;
+      if (score > maxScore) {
+        maxScore = score;
+        headerRowIdx = r;
+      }
     }
+    // If no obvious headers found, fallback to row 0
+    if (maxScore === 0) headerRowIdx = 0;
   }
-  // If no obvious headers found, fallback to row 0
-  if (maxScore === 0) headerRowIdx = 0;
 
   const rawHeaders = (rows[headerRowIdx] || []).map((h) => (h || '').trim());
   const hasValidHeader = rawHeaders.some((h) => h.length > 0);
@@ -240,6 +246,42 @@ export function convertRowsToLeads(
         if (phoneCell) contact = phoneCell;
       }
     }
+
+    // Normalize contact to international format when possible
+    try {
+      const normalized = normalizePhoneNumber(contact || undefined);
+      if (normalized) contact = normalized;
+    } catch (e) {
+      // ignore normalization errors
+    }
+
+    // Normalize simple date strings to YYYY-MM-DD where possible
+    const normalizeDateStr = (s: string) => {
+      if (!s) return '';
+      const trimmed = s.trim();
+      // Try parsing common formats
+      const asIso = Date.parse(trimmed);
+      if (!isNaN(asIso)) {
+        const d = new Date(asIso);
+        return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+      }
+      // Try dd/mm/yyyy or dd-mm-yyyy
+      const m = trimmed.match(/^(\d{1,2})[\/-](\d{1,2})[\/-](\d{2,4})$/);
+      if (m) {
+        const p1 = parseInt(m[1], 10);
+        const p2 = parseInt(m[2], 10);
+        let y = parseInt(m[3], 10);
+        if (y < 100) y += 2000;
+        // heuristics: if first part > 12, treat as day
+        const day = p1 > 12 ? p1 : p2;
+        const month = p1 > 12 ? p2 : p1;
+        return `${y}-${String(month).padStart(2, '0')}-${String(day).padStart(2, '0')}`;
+      }
+      return trimmed;
+    };
+
+    if (date) date = normalizeDateStr(date);
+    if (followUpDate) followUpDate = normalizeDateStr(followUpDate);
 
     if (!place) {
       for (const [ckey, cval] of Object.entries(customFields)) {
@@ -407,7 +449,8 @@ export async function fetchSheetRows(
   spreadsheetId: string,
   sheetName: string,
   accessToken: string,
-  customMapping?: Record<string, string>
+  customMapping?: Record<string, string>,
+  headerRowIdxOverride?: number
 ): Promise<{ headers: string[]; leads: Lead[] }> {
   const cleanId = extractSpreadsheetId(spreadsheetId);
   const range = formatSheetRange(sheetName, 'A1:ZZ1000');
@@ -436,7 +479,7 @@ export async function fetchSheetRows(
 
   const data = await res.json();
   const rows: string[][] = data.values || [];
-  return convertRowsToLeads(rows, customMapping);
+  return convertRowsToLeads(rows, customMapping, headerRowIdxOverride);
 }
 
 /**
@@ -525,6 +568,8 @@ export async function fetchSheetPreview(
   headers: string[];
   sample: string[][];
   mappingSuggestions: Record<string, { suggestedKey: string; confidence: number }>;
+  rawRows: string[][];
+  candidates: { idx: number; cells: string[]; text: string }[];
 }> {
   const cleanId = extractSpreadsheetId(spreadsheetId);
   const { title, sheets } = await fetchSpreadsheetTabs(cleanId, accessToken);
@@ -548,7 +593,8 @@ export async function fetchSheetPreview(
   const headers = rawHeaders.length ? rawHeaders : DEFAULT_HEADERS;
   const sample = rows.slice(headerRowIdx + 1, headerRowIdx + 1 + sampleRows);
   const mappingSuggestions = buildHeaderMapping(headers);
-  return { title: title || 'Google Sheet', sheetName: tab, headerRowIdx, headerConfidence: confidence, headers, sample, mappingSuggestions };
+  const candidates = (rows.slice(0, Math.min(rows.length, 10)) || []).map((cells, idx) => ({ idx, cells, text: (cells || []).join(' | ').slice(0, 120) }));
+  return { title: title || 'Google Sheet', sheetName: tab, headerRowIdx, headerConfidence: confidence, headers, sample, mappingSuggestions, rawRows: rows, candidates };
 }
 
 /**
@@ -558,7 +604,8 @@ export async function syncGoogleSheetData(
   spreadsheetIdInput: string,
   accessToken: string,
   selectedTabName?: string,
-  customMapping?: Record<string, string>
+  customMapping?: Record<string, string>,
+  headerRowIdx?: number
 ): Promise<{
   title: string;
   sheetName: string;
@@ -573,7 +620,7 @@ export async function syncGoogleSheetData(
     selectedTabName && sheets.includes(selectedTabName)
       ? selectedTabName
       : sheets[0] || 'Sheet1';
-  const { headers, leads } = await fetchSheetRows(spreadsheetId, sheetName, accessToken, customMapping);
+  const { headers, leads } = await fetchSheetRows(spreadsheetId, sheetName, accessToken, customMapping, headerRowIdx);
   return { title, sheetName, availableSheets: sheets, headers, leads, spreadsheetId };
 }
 
@@ -620,7 +667,8 @@ export async function syncOrCreateGoogleSheet(
   spreadsheetIdInput: string,
   accessToken: string,
   selectedTabName?: string,
-  customMapping?: Record<string, string>
+  customMapping?: Record<string, string>,
+  headerRowIdx?: number
 ): Promise<{
   title: string;
   sheetName: string;
@@ -634,7 +682,7 @@ export async function syncOrCreateGoogleSheet(
   // 1. If it's a real ID and not the placeholder default ID, try to sync it directly
     if (cleanId) {
     try {
-      return await syncGoogleSheetData(cleanId, accessToken, selectedTabName, customMapping);
+      return await syncGoogleSheetData(cleanId, accessToken, selectedTabName, customMapping, headerRowIdx);
     } catch (err: any) {
       if (err.message && (err.message.includes('401') || err.message.includes('403'))) {
         throw err;
@@ -658,7 +706,7 @@ export async function syncOrCreateGoogleSheet(
         if (searchData.files && searchData.files.length > 0) {
         const foundId = searchData.files[0].id;
         try {
-          return await syncGoogleSheetData(foundId, accessToken, selectedTabName, customMapping);
+          return await syncGoogleSheetData(foundId, accessToken, selectedTabName, customMapping, headerRowIdx);
         } catch (e) {
           // ignore and fall through
         }
