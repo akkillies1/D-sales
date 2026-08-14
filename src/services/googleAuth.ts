@@ -365,3 +365,48 @@ export const verifyAndSetAccessToken = async (token: string): Promise<void> => {
   cachedAccessTokenUid = currentUser.uid;
   cachedGoogleUser = { email: info.email, sub: info.sub };
 };
+
+/**
+ * Assert that the currently cached OAuth token belongs to the current Firebase user.
+ * Throws on any mismatch. Returns the verified token and Google userinfo.
+ */
+export const assertGoogleAccountOwnership = async (): Promise<{ token: string; googleUser: { email: string; sub: string } }> => {
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('No signed-in Firebase user');
+
+  const token = getAccessToken();
+  if (!token) throw new Error('No verified Google OAuth token available for the current user');
+
+  // Verify token via userinfo endpoint
+  const info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.ok ? r.json() : null).catch(() => null);
+
+  if (!info || !info.email || !info.sub) {
+    // token invalid or unable to verify
+    // clear cached token to avoid further misuse
+    cachedAccessToken = null;
+    cachedAccessTokenUid = null;
+    cachedGoogleUser = null;
+    throw new Error('Failed to verify Google OAuth token with userinfo');
+  }
+
+  if (String(info.email).toLowerCase() !== String(currentUser.email).toLowerCase()) {
+    cachedAccessToken = null;
+    cachedAccessTokenUid = null;
+    cachedGoogleUser = null;
+    throw new Error('Google account email does not match signed-in Firebase user');
+  }
+
+  if (cachedAccessTokenUid !== currentUser.uid) {
+    cachedAccessToken = null;
+    cachedAccessTokenUid = null;
+    cachedGoogleUser = null;
+    throw new Error('OAuth token is not bound to the current Firebase user');
+  }
+
+  // Update cachedGoogleUser with verified info
+  cachedGoogleUser = { email: info.email, sub: info.sub };
+
+  return { token, googleUser: { email: info.email, sub: info.sub } };
+};

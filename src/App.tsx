@@ -16,7 +16,7 @@ import {
   listDriveSpreadsheets,
   fetchSpreadsheetTabs,
 } from './services/googleSheets';
-import { googleSignIn, initAuth, googleSignOut, getAccessToken, getGoogleUser, clearGoogleAuthState, verifyAndSetAccessToken } from './services/googleAuth';
+import { googleSignIn, initAuth, googleSignOut, getAccessToken, getGoogleUser, clearGoogleAuthState, verifyAndSetAccessToken, assertGoogleAccountOwnership } from './services/googleAuth';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { SUPPORT_PHONE_LINK, WHATSAPP_LINK } from './config';
@@ -104,7 +104,7 @@ export default function App() {
   // Initialize Firebase auth listener to track sign-in state
   useEffect(() => {
     const unsubscribe = initAuth(
-      (user, token) => {
+      async (user, token) => {
         // User is Firebase-authenticated
           // If previous user exists and is different, clear prior user's Google/Sheets state
           if (prevUserUidRef.current && prevUserUidRef.current !== user.uid) {
@@ -125,11 +125,11 @@ export default function App() {
         } catch (e) {
           // ignore
         }
-        // Use authoritative accessor which enforces ownership check
-        const verified = getAccessToken();
-        if (verified) {
-          setOauthToken(verified);
-        } else {
+        // Attempt to assert Google ownership for any available token
+        try {
+          const asserted = await assertGoogleAccountOwnership();
+          setOauthToken(asserted.token);
+        } catch (e) {
           setOauthToken('');
           // If a token was returned by redirect but failed verification, inform user and clear persisted sheet
           const googleUser = getGoogleUser();
@@ -197,8 +197,13 @@ export default function App() {
     }
 
     // Validate spreadsheet really accessible with current token via Sheets API
-    const token = getAccessToken();
-    if (!token) return;
+    let token: string;
+    try {
+      const asserted = await assertGoogleAccountOwnership();
+      token = asserted.token;
+    } catch (e) {
+      return;
+    }
     try {
       await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(opts.spreadsheetId)}`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -250,6 +255,11 @@ export default function App() {
         localStorage.removeItem(`google_spreadsheet_id_${prevUserUidRef.current}`);
         localStorage.removeItem(`google_sheet_tab_${prevUserUidRef.current}`);
       }
+      // Remove any pending connect markers and legacy global keys
+      try { localStorage.removeItem('pending_connect'); } catch (e) {}
+      try { localStorage.removeItem('pending_connect_processed'); } catch (e) {}
+      try { localStorage.removeItem('google_spreadsheet_id'); } catch (e) {}
+      try { localStorage.removeItem('google_sheet_tab'); } catch (e) {}
     } catch (e) {}
   }, []);
 
@@ -279,9 +289,11 @@ export default function App() {
         if (pending) {
           try {
             const p = JSON.parse(pending);
-            // Accept only the minimal allowed shape for pending_connect
-            const allowed = p && typeof p === 'object' && Object.keys(p).every((k) => ['sheetId', 'selectedTab'].includes(k));
-            if (allowed && p.sheetId && currentUser) {
+            // Accept only the minimal allowed shape for pending_connect and ensure it's scoped to current Firebase UID
+            const allowed = p && typeof p === 'object' && ['firebaseUid', 'sheetId', 'selectedTab'].every((k) => Object.prototype.hasOwnProperty.call(p, k));
+            if (!allowed) {
+              localStorage.removeItem('pending_connect');
+            } else if (p.firebaseUid && currentUser && p.firebaseUid === currentUser.uid && p.sheetId) {
               const verifiedToken = getAccessToken();
               if (verifiedToken) {
                 await handleSyncWithGoogle(p.sheetId, verifiedToken, p.selectedTab || undefined);
@@ -289,11 +301,14 @@ export default function App() {
               localStorage.removeItem('pending_connect');
               return;
             } else {
-              // Malformed or stale pending_connect — remove it
+              // Pending connect belongs to a different user — discard it
               localStorage.removeItem('pending_connect');
             }
           } catch (e) {
-            // ignore parse errors
+            // ignore parse errors but remove the key to be safe
+            try {
+              localStorage.removeItem('pending_connect');
+            } catch (err) {}
           }
         }
 
@@ -437,12 +452,32 @@ export default function App() {
   // Sync from live Google Sheet or auto-create in Google Drive
   const handleSyncWithGoogle = async (
     spreadsheetId: string,
-    token: string,
+    token?: string,
     selectedTabName?: string
   ): Promise<void> => {
     setIsLoading(true);
     try {
-      const result = await syncOrCreateGoogleSheet(spreadsheetId, token, selectedTabName);
+      // Ensure the OAuth token is verified for the current Firebase user
+      let verifiedToken = token || '';
+      try {
+        const res = await assertGoogleAccountOwnership();
+        verifiedToken = res.token;
+      } catch (assertErr) {
+        // Ownership assertion failed — clear state and abort
+        try {
+          showToast('Google account ownership verification failed. Please reconnect.');
+        } catch (e) {}
+        try {
+          if (currentUser?.uid) {
+            localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
+            localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
+          }
+        } catch (e) {}
+        resetGoogleAndSheetState();
+        return;
+      }
+
+      const result = await syncOrCreateGoogleSheet(spreadsheetId, verifiedToken, selectedTabName);
       setLeads(result.leads);
       setHeaders(result.headers);
       // Use central setter to ensure all checks occur
@@ -469,17 +504,10 @@ export default function App() {
     } catch (err: any) {
       const msg = err?.message || '';
       showToast(`Sheet Sync Notice: ${msg || 'Using offline demo data'}`);
-      // If Google indicates unauthorized or forbidden, invalidate Google auth state
+      // If Google indicates unauthorized or forbidden, perform full reset
       if (String(msg).includes('401') || String(msg).includes('403') || String(msg).toLowerCase().includes('permission denied')) {
         try {
-          clearGoogleAuthState();
-          setOauthToken('');
-          if (currentUser?.uid) {
-            try {
-              localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
-              localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
-            } catch (e) {}
-          }
+          resetGoogleAndSheetState();
           showToast('Google authorization expired or revoked. Please reconnect Google to continue.');
         } catch (e) {}
       }
@@ -497,9 +525,11 @@ export default function App() {
 
     const timer = setInterval(async () => {
       try {
+        // Ensure token ownership before polling
+        const verified = await assertGoogleAccountOwnership();
         const result = await syncGoogleSheetData(
           sheetMetadata.spreadsheetId,
-          oauthToken,
+          verified.token,
           sheetMetadata.sheetName,
           sheetMetadata.customColumnMapping
         );
@@ -628,15 +658,17 @@ export default function App() {
     }
 
     // Sync to live Google Sheet if token is present
-    if (!sheetMetadata.isDemoMode && oauthToken) {
+    if (!sheetMetadata.isDemoMode) {
       try {
+        const verified = await assertGoogleAccountOwnership();
+        const token = verified.token;
         if (isEdit) {
           await updateRowInSheet(
             sheetMetadata.spreadsheetId,
             sheetMetadata.sheetName,
             lead,
             headers,
-            oauthToken
+            token
           );
         } else {
           const createdLead = nextLeads[nextLeads.length - 1];
@@ -645,7 +677,7 @@ export default function App() {
             sheetMetadata.sheetName,
             createdLead,
             headers,
-            oauthToken
+            token
           );
           if (appendRes?.updatedRowIndex) {
             const actualRowIdx = appendRes.updatedRowIndex;
@@ -676,14 +708,15 @@ export default function App() {
     persistState(nextLeads, headers);
     showToast(`Removed "${lead.name}" from leads list`);
 
-    if (!sheetMetadata.isDemoMode && oauthToken && lead.rowIndex > 0) {
+    if (!sheetMetadata.isDemoMode && lead.rowIndex > 0) {
       try {
+        const verified = await assertGoogleAccountOwnership();
         await clearRowInSheet(
           sheetMetadata.spreadsheetId,
           sheetMetadata.sheetName,
           lead.rowIndex,
           headers,
-          oauthToken
+          verified.token
         );
       } catch (err: any) {
         showToast(`Removed locally! Google Sheet note: ${err.message}`);
@@ -698,9 +731,10 @@ export default function App() {
     setLeads(nextLeads);
     persistState(nextLeads, headers);
 
-    if (!sheetMetadata.isDemoMode && oauthToken && updated.rowIndex > 0) {
+    if (!sheetMetadata.isDemoMode && updated.rowIndex > 0) {
       try {
-        await updateRowInSheet(sheetMetadata.spreadsheetId, sheetMetadata.sheetName, updated, headers, oauthToken);
+        const verified = await assertGoogleAccountOwnership();
+        await updateRowInSheet(sheetMetadata.spreadsheetId, sheetMetadata.sheetName, updated, headers, verified.token);
       } catch (err: any) {
         const msg = err?.message || '';
         if (String(msg).includes('401') || String(msg).includes('403') || String(msg).toLowerCase().includes('permission denied')) {
@@ -737,9 +771,10 @@ export default function App() {
     setHeaders(newHeaders);
     persistState(leads, newHeaders);
 
-    if (!sheetMetadata.isDemoMode && oauthToken && sheetMetadata.spreadsheetId) {
+    if (!sheetMetadata.isDemoMode && sheetMetadata.spreadsheetId) {
       try {
-        await appendHeaderColumn(sheetMetadata.spreadsheetId, sheetMetadata.sheetName || 'Sheet1', cleaned, headers.length, oauthToken);
+        const verified = await assertGoogleAccountOwnership();
+        await appendHeaderColumn(sheetMetadata.spreadsheetId, sheetMetadata.sheetName || 'Sheet1', cleaned, headers.length, verified.token);
         setSheetMetadata((prev) => ({ ...prev, headers: newHeaders, lastSynced: new Date() }));
         showToast(`Added new column "${cleaned}" and synced to Google Sheet`);
       } catch (e: any) {

@@ -18,7 +18,7 @@ import {
   extractSpreadsheetId,
   listDriveSpreadsheets,
 } from '../services/googleSheets';
-import { googleSignIn, getAccessToken, verifyAndSetAccessToken, getGoogleUser, clearGoogleAuthState } from '../services/googleAuth';
+import { googleSignIn, getAccessToken, verifyAndSetAccessToken, getGoogleUser, clearGoogleAuthState, assertGoogleAccountOwnership, auth } from '../services/googleAuth';
 
 interface ConnectSheetModalProps {
   isOpen: boolean;
@@ -83,7 +83,9 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
       const cleanId = extractSpreadsheetId(sheetId || '');
       // Save pending connect request to localStorage so it can be completed after redirect
       try {
-        localStorage.setItem('pending_connect', JSON.stringify({ sheetId: cleanId, selectedTab }));
+        // Include firebaseUid so pending connects are user-scoped and cannot be replayed across accounts
+        const firebaseUid = auth.currentUser?.uid || null;
+        localStorage.setItem('pending_connect', JSON.stringify({ firebaseUid, sheetId: cleanId, selectedTab }));
       } catch (e) {}
       // Trigger redirect sign-in flow; the app will process pending_connect after redirect
       await googleSignIn();
@@ -144,6 +146,12 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
         }
       }
       if (!token) throw new Error('Please sign in with Google first to browse Drive');
+      // As a final safety check, assert the token is bound to current Firebase user
+      try {
+        await assertGoogleAccountOwnership();
+      } catch (e) {
+        throw new Error('Google account ownership verification failed for Drive browse');
+      }
       const files = await listDriveSpreadsheets(token, 50, '');
       setDriveFiles(files);
     } catch (err: any) {
@@ -169,6 +177,12 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     }
     if (!token) {
       setErrorMsg('Please sign in with Google first');
+      return;
+    }
+    try {
+      await assertGoogleAccountOwnership();
+    } catch (e) {
+      setErrorMsg('Google account ownership verification failed');
       return;
     }
     try {
@@ -205,6 +219,12 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
           throw new Error('Please sign in with Google first to create a spreadsheet.');
         }
       }
+      // Verify ownership before creating a sheet
+      try {
+        await assertGoogleAccountOwnership();
+      } catch (e) {
+        throw new Error('Google account ownership verification failed. Please reconnect.');
+      }
       const newSheet = await createSampleSpreadsheet(token, 'SalesFlow Pro Leads');
       setSheetId(newSheet.spreadsheetId);
       await onConnectToken(newSheet.spreadsheetId, token);
@@ -235,6 +255,11 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
         await verifyAndSetAccessToken(tokenInput.trim());
         token = tokenInput.trim();
         setTokenInput(token);
+      }
+      try {
+        await assertGoogleAccountOwnership();
+      } catch (e) {
+        throw new Error('Google account ownership verification failed. Please reconnect.');
       }
       const cleanId = extractSpreadsheetId(sheetId.trim());
       await onConnectToken(cleanId, token, selectedTab);
