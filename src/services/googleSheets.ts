@@ -252,16 +252,24 @@ export function convertRowsToLeads(
     return { headers: DEFAULT_HEADERS, leads: [] };
   }
 
-  // Find the actual header row (in case row 0 is a title or empty)
+  // Find the actual header row by looking for common header keywords
   let headerRowIdx = 0;
-  let maxCols = 0;
+  let maxScore = -1;
   for (let r = 0; r < Math.min(rows.length, 5); r++) {
-    const nonColCount = (rows[r] || []).filter((cell) => cell && cell.trim().length > 0).length;
-    if (nonColCount > maxCols) {
-      maxCols = nonColCount;
+    const row = rows[r] || [];
+    let score = 0;
+    const str = row.join(' ').toLowerCase();
+    if (str.includes('name') || str.includes('client')) score += 1;
+    if (str.includes('status') || str.includes('stage')) score += 1;
+    if (str.includes('date') || str.includes('time')) score += 1;
+    if (str.includes('contact') || str.includes('phone')) score += 1;
+    if (score > maxScore) {
+      maxScore = score;
       headerRowIdx = r;
     }
   }
+  // If no obvious headers found, fallback to row 0
+  if (maxScore === 0) headerRowIdx = 0;
 
   const rawHeaders = (rows[headerRowIdx] || []).map((h) => (h || '').trim());
   const hasValidHeader = rawHeaders.some((h) => h.length > 0);
@@ -525,7 +533,7 @@ export async function fetchSpreadsheetTabs(
     const errorText = await res.text();
     if (res.status === 401 || res.status === 403) {
       throw new Error(
-        'Permission Denied (403/401): Please sign in with a Google account that has access to this spreadsheet.'
+        'Permission Denied (403/401): Please sign in with a Google account that has access to this spreadsheet. If you recently added scopes, please sign out and sign back in.'
       );
     }
     if (res.status === 404) {
@@ -585,7 +593,7 @@ export async function fetchSheetRows(
     const errText = await res.text();
     if (res.status === 401 || res.status === 403) {
       throw new Error(
-        'Permission Denied (403/401): Please sign in with a Google account that has access to this spreadsheet.'
+        'Permission Denied (403/401): Please sign in with a Google account that has access to this spreadsheet. If you recently added scopes, please sign out and sign back in.'
       );
     }
     throw new Error(
@@ -748,7 +756,7 @@ export async function listDriveSpreadsheets(
       } catch (e) {
         // ignore JSON parse
       }
-      throw new Error(msg + ' Ensure the token includes Drive scopes and the OAuth consent allows these scopes.');
+      throw new Error(msg + ' Ensure the token includes Drive scopes and the OAuth consent allows these scopes. IMPORTANT: If you recently added scopes in Google Cloud Console, you MUST sign out and sign back in for them to take effect.');
     }
     throw new Error(`Failed to list Drive files (${res.status}): ${text}`);
   }
