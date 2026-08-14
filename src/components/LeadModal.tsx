@@ -182,10 +182,10 @@ export const LeadModal: React.FC<LeadModalProps> = ({
   };
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/75 backdrop-blur-sm p-4 animate-in fade-in duration-200">
-      <div className="bg-[#121215] border border-zinc-800 rounded-2xl w-full max-w-2xl overflow-hidden shadow-2xl flex flex-col max-h-[90vh]">
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-300">
+      <div className="premium-modal rounded-2xl w-full max-w-2xl overflow-hidden flex flex-col max-h-[90vh] transform transition-all">
         {/* Header */}
-        <div className="flex items-center justify-between px-6 py-4 border-b border-zinc-800 bg-zinc-900/60">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-white/5 bg-white/5">
           <div>
             <h3 className="text-lg font-bold text-zinc-100">
               {initialLead ? 'Edit Lead' : 'Create New Lead'}
@@ -650,15 +650,15 @@ export const LeadModal: React.FC<LeadModalProps> = ({
             <button
               type="button"
               onClick={onClose}
-              className="px-4 py-2 rounded-lg bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-sm font-medium transition-colors"
+              className="px-5 py-2.5 text-sm font-medium text-zinc-300 bg-white/5 border border-white/10 rounded-xl hover:bg-white/10 hover:text-white transition-all active:scale-95"
             >
               Cancel
             </button>
             <button
-              type="submit"
-              className="px-5 py-2 rounded-lg bg-blue-600 hover:bg-blue-500 text-white text-sm font-semibold shadow-lg shadow-blue-600/30 transition-all flex items-center space-x-1.5"
+              onClick={handleSave}
+              className="px-5 py-2.5 text-sm font-medium text-white bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 rounded-xl shadow-lg shadow-blue-500/20 hover:shadow-blue-500/40 transition-all active:scale-95"
             >
-              <Save className="w-4 h-4" />
+              <Save className="w-4 h-4 inline-block mr-1.5" />
               <span>{initialLead ? 'Save Changes' : 'Add to Google Sheet'}</span>
             </button>
           </div>
