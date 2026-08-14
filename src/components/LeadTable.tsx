@@ -1,7 +1,8 @@
 import React, { useState } from 'react';
 import { Lead } from '../types';
 import { DEFAULT_HEADERS } from '../services/googleSheets';
-import { Edit2, Phone, MapPin, Calendar, Tag, Trash2, ArrowUpDown } from 'lucide-react';
+import { Edit2, Phone, MapPin, Calendar, Tag, Trash2, ArrowUpDown, MessageSquare } from 'lucide-react';
+import { buildWhatsAppUrl, buildCallUrl } from '../utils/phone';
 
 interface LeadTableProps {
   leads: Lead[];
@@ -231,6 +232,48 @@ export const LeadTable: React.FC<LeadTableProps> = ({
                     onClick={(e) => e.stopPropagation()}
                   >
                     <div className="flex items-center justify-end space-x-2">
+                      {/* WhatsApp */}
+                      {(() => {
+                        const wa = buildWhatsAppUrl(lead.contact, lead.name);
+                        const waDisabled = !wa;
+                        return (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const url = buildWhatsAppUrl(lead.contact, lead.name);
+                              if (url) {
+                                window.open(url, '_blank', 'noopener,noreferrer');
+                              }
+                            }}
+                            title={waDisabled ? 'No phone number available' : 'Send WhatsApp message'}
+                            className={`p-1.5 rounded-md transition-colors ${waDisabled ? 'opacity-40 pointer-events-none text-zinc-600' : 'text-emerald-400 hover:bg-emerald-700/10 hover:text-emerald-300'}`}
+                          >
+                            <MessageSquare className="w-4 h-4" />
+                          </button>
+                        );
+                      })()}
+
+                      {/* Call */}
+                      {(() => {
+                        const call = buildCallUrl(lead.contact);
+                        const callDisabled = !call;
+                        return (
+                          <button
+                            onClick={(e) => {
+                              e.stopPropagation();
+                              const url = buildCallUrl(lead.contact);
+                              if (url) {
+                                // Use location change to trigger native dialer on mobile
+                                window.location.href = url;
+                              }
+                            }}
+                            title={callDisabled ? 'No phone number available' : 'Call lead'}
+                            className={`p-1.5 rounded-md transition-colors ${callDisabled ? 'opacity-40 pointer-events-none text-zinc-600' : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'}`}
+                          >
+                            <Phone className="w-4 h-4" />
+                          </button>
+                        );
+                      })()}
                       <button
                         onClick={() => onEditLead(lead)}
                         title="Edit Lead"

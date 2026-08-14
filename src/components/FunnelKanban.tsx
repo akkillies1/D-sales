@@ -9,7 +9,9 @@ import {
   Tag,
   DollarSign,
   Filter,
+  MessageSquare,
 } from 'lucide-react';
+import { buildWhatsAppUrl, buildCallUrl } from '../utils/phone';
 
 interface FunnelKanbanProps {
   leads: Lead[];
@@ -314,16 +316,56 @@ export const FunnelKanban: React.FC<FunnelKanbanProps> = ({
                             )}
                           </div>
 
-                          <button
-                            onClick={(e) => {
-                              e.stopPropagation();
-                              onEditLead(lead);
-                            }}
-                            className="text-zinc-500 hover:text-white p-1 rounded transition-colors opacity-80 group-hover:opacity-100"
-                            title="Edit Lead Details"
-                          >
-                            <Edit2 className="w-3.5 h-3.5" />
-                          </button>
+                          <div className="flex items-center space-x-1">
+                            {/* WhatsApp */}
+                            {(() => {
+                              const wa = buildWhatsAppUrl(lead.contact, lead.name);
+                              const waDisabled = !wa;
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const url = buildWhatsAppUrl(lead.contact, lead.name);
+                                    if (url) window.open(url, '_blank', 'noopener,noreferrer');
+                                  }}
+                                  title={waDisabled ? 'No phone number available' : 'Send WhatsApp message'}
+                                  className={`p-1.5 rounded-md transition-colors ${waDisabled ? 'opacity-40 pointer-events-none text-zinc-600' : 'text-emerald-400 hover:bg-emerald-700/10 hover:text-emerald-300'}`}
+                                >
+                                  <MessageSquare className="w-3.5 h-3.5" />
+                                </button>
+                              );
+                            })()}
+
+                            {/* Call */}
+                            {(() => {
+                              const call = buildCallUrl(lead.contact);
+                              const callDisabled = !call;
+                              return (
+                                <button
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    const url = buildCallUrl(lead.contact);
+                                    if (url) window.location.href = url;
+                                  }}
+                                  title={callDisabled ? 'No phone number available' : 'Call lead'}
+                                  className={`p-1.5 rounded-md transition-colors ${callDisabled ? 'opacity-40 pointer-events-none text-zinc-600' : 'text-zinc-300 hover:bg-zinc-800 hover:text-white'}`}
+                                >
+                                  <Phone className="w-3.5 h-3.5" />
+                                </button>
+                              );
+                            })()}
+
+                            <button
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                onEditLead(lead);
+                              }}
+                              className="text-zinc-500 hover:text-white p-1 rounded transition-colors opacity-80 group-hover:opacity-100"
+                              title="Edit Lead Details"
+                            >
+                              <Edit2 className="w-3.5 h-3.5" />
+                            </button>
+                          </div>
                         </div>
 
                         {/* Requirement Preview */}

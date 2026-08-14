@@ -17,6 +17,7 @@ import {
   createSampleSpreadsheet,
   extractSpreadsheetId,
   listDriveSpreadsheets,
+  fetchSheetPreview,
 } from '../services/googleSheets';
 import { googleSignIn, getAccessToken, verifyAndSetAccessToken, getGoogleUser, clearGoogleAuthState, assertGoogleAccountOwnership, auth } from '../services/googleAuth';
 
@@ -52,6 +53,9 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
   const [tokenInput, setTokenInput] = useState('');
   const [isConnecting, setIsConnecting] = useState(false);
   const [isCreatingSample, setIsCreatingSample] = useState(false);
+  const [isPreviewing, setIsPreviewing] = useState(false);
+  const [previewData, setPreviewData] = useState<any | null>(null);
+  const [previewError, setPreviewError] = useState<string | null>(null);
   const [errorMsg, setErrorMsg] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
   const [isBrowsingDrive, setIsBrowsingDrive] = useState(false);
@@ -493,6 +497,151 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
                   <Info className="w-3.5 h-3.5" />
                   <span>Configure Field Mapping ({headers.length} Cols)</span>
                 </button>
+              )}
+            </div>
+
+            {/* Preview controls */}
+            <div className="pt-3 text-xs">
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={async () => {
+                    setPreviewError(null);
+                    setPreviewData(null);
+                    setIsPreviewing(true);
+                    try {
+                      let token = tokenInput.trim() || getAccessToken();
+                      if (tokenInput.trim() && !getAccessToken()) {
+                        await verifyAndSetAccessToken(tokenInput.trim());
+                        token = tokenInput.trim();
+                        setTokenInput(token);
+                      }
+                      if (!token) throw new Error('Please sign in with Google to preview this sheet');
+                      await assertGoogleAccountOwnership();
+                      const preview = await fetchSheetPreview(extractSpreadsheetId(sheetId.trim()), selectedTab, token);
+                      setPreviewData(preview);
+                    } catch (err: any) {
+                      setPreviewError(err.message || 'Failed to preview sheet');
+                    } finally {
+                      setIsPreviewing(false);
+                    }
+                  }}
+                  className="text-xs bg-zinc-800 hover:bg-zinc-700 text-zinc-200 px-2 py-1 rounded"
+                >
+                  {isPreviewing ? 'Previewing...' : 'Preview & Map'}
+                </button>
+
+                <button
+                  onClick={() => {
+                    // Open full column mapper if caller provided
+                    if (onOpenColumnMapper) {
+                      onOpenColumnMapper();
+                      onClose();
+                    }
+                  }}
+                  className="text-xs bg-zinc-800 hover:bg-zinc-700 text-blue-400 px-2 py-1 rounded"
+                >
+                  Review Mapping
+                </button>
+              </div>
+
+              {previewError && <div className="mt-2 text-xs text-red-400">{previewError}</div>}
+
+              {previewData && (
+                <div className="mt-3 bg-black/40 border border-zinc-800 rounded p-3 text-xs">
+                  <div className="flex items-center justify-between mb-2">
+                    <div>
+                      <div className="font-semibold text-zinc-200">Preview: {previewData.title} — {previewData.sheetName}</div>
+                      <div className="text-zinc-400 text-[11px]">Detected header row: Row {previewData.headerRowIdx + 1} (confidence {Math.round(previewData.headerConfidence * 100)}%)</div>
+                    </div>
+                    <div>
+                      <button
+                        onClick={() => setPreviewData(null)}
+                        className="text-xs text-zinc-400 hover:text-white px-2 py-1 rounded"
+                      >
+                        Close Preview
+                      </button>
+                    </div>
+                  </div>
+
+                  <div className="overflow-auto max-h-44">
+                    <table className="w-full text-left text-[12px] border-collapse">
+                      <thead>
+                        <tr>
+                          {previewData.headers.map((h: string, i: number) => (
+                            <th key={i} className="px-2 py-1 border-b border-zinc-800 text-zinc-300">{h || '(empty)'}</th>
+                          ))}
+                        </tr>
+                        <tr>
+                          {previewData.headers.map((h: string, i: number) => (
+                            <th key={i} className="px-2 py-1 border-b border-zinc-800 text-zinc-400 font-mono text-xs">{previewData.mappingSuggestions[h]?.suggestedKey || 'custom'} ({Math.round((previewData.mappingSuggestions[h]?.confidence||0)*100)}%)</th>
+                          ))}
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {previewData.sample.slice(0,5).map((row: string[], ri: number) => (
+                          <tr key={ri} className="align-top">
+                            {previewData.headers.map((_: string, ci: number) => (
+                              <td key={ci} className="px-2 py-1 align-top text-zinc-300">{(row[ci] || '')}</td>
+                            ))}
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-end space-x-2">
+                    <button
+                      onClick={async () => {
+                        // build custom mapping from suggestions and call connect
+                        const mapping: Record<string,string> = {};
+                        for (const h of previewData.headers) {
+                          const s = previewData.mappingSuggestions[h];
+                          if (s && s.suggestedKey && s.confidence > 0.2) mapping[h] = s.suggestedKey;
+                        }
+                        let token = tokenInput.trim() || getAccessToken();
+                        if (tokenInput.trim() && !getAccessToken()) {
+                          try {
+                            await verifyAndSetAccessToken(tokenInput.trim());
+                            token = tokenInput.trim();
+                            setTokenInput(token);
+                          } catch (err: any) {
+                            setPreviewError(err.message || 'Token verification failed');
+                            return;
+                          }
+                        }
+                        if (!token) { setPreviewError('Please sign in with Google first'); return; }
+                        try {
+                          await assertGoogleAccountOwnership();
+                        } catch (e) {
+                          setPreviewError('Google account ownership verification failed');
+                          return;
+                        }
+                        try {
+                          await onConnectToken(extractSpreadsheetId(sheetId.trim()), token, selectedTab, mapping);
+                          setPreviewData(null);
+                          onClose();
+                        } catch (err: any) {
+                          setPreviewError(err.message || 'Failed to connect with mapping');
+                        }
+                      }}
+                      className="bg-blue-600 hover:bg-blue-500 text-white px-3 py-1.5 rounded text-xs"
+                    >
+                      Import & Connect
+                    </button>
+
+                    <button
+                      onClick={() => {
+                        if (onOpenColumnMapper) {
+                          onOpenColumnMapper();
+                          onClose();
+                        }
+                      }}
+                      className="bg-zinc-800 hover:bg-zinc-700 text-blue-400 px-3 py-1.5 rounded text-xs"
+                    >
+                      Configure Mapping
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
 

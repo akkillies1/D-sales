@@ -1,4 +1,5 @@
 import { Lead } from '../types';
+import { findBestFieldMatch } from './leadFields';
 
 // No global/default spreadsheet ID is defined here. Spreadsheets must be
 // explicitly connected per authenticated user and validated via the Sheets API.
@@ -39,180 +40,11 @@ function normalizeHeader(h: string): string {
 export function matchHeaderToKey(
   header: string
 ): keyof Omit<Lead, 'rowIndex' | 'customFields' | 'history'> | 'custom' {
-  const norm = normalizeHeader(header);
-  if (!norm) return 'custom';
-
-  // 1. Serial No / ID
-  if (
-    ['slno', 'sl', 'sno', 'serial', 'id', 'no', 'number', 'sl', 'sr', 'srno'].includes(norm) ||
-    norm.startsWith('sl') ||
-    norm.startsWith('sno')
-  ) {
-    return 'slNo';
-  }
-
-  // 2. Follow-up Date (check BEFORE general date)
-  if (
-    norm.includes('follow') ||
-    norm.includes('nextdate') ||
-    norm.includes('nextcontact') ||
-    norm.includes('remind') ||
-    norm.includes('duedate') ||
-    norm.includes('nextfollow')
-  ) {
-    return 'followUpDate';
-  }
-
-  // 3. Date
-  if (
-    norm.includes('date') ||
-    norm.includes('created') ||
-    norm.includes('inquir') ||
-    norm.includes('timestamp') ||
-    norm.includes('entry') ||
-    norm === 'dt'
-  ) {
-    return 'date';
-  }
-
-  // 4. Name / Client / Customer
-  if (
-    norm.includes('name') ||
-    norm.includes('client') ||
-    norm.includes('customer') ||
-    norm.includes('prospect') ||
-    norm.includes('person') ||
-    norm.includes('lead')
-  ) {
-    if (
-      !norm.includes('status') &&
-      !norm.includes('stage') &&
-      !norm.includes('source') &&
-      !norm.includes('ref')
-    ) {
-      return 'name';
-    }
-  }
-
-  // 5. Contact / Phone / Mobile / Email
-  if (
-    norm.includes('phone') ||
-    norm.includes('mobile') ||
-    norm.includes('contact') ||
-    norm.includes('email') ||
-    norm.includes('tel') ||
-    norm.includes('whatsapp') ||
-    norm.includes('call') ||
-    norm.includes('number')
-  ) {
-    return 'contact';
-  }
-
-  // 6. Place / Location / City / Address
-  if (
-    norm.includes('place') ||
-    norm.includes('location') ||
-    norm.includes('city') ||
-    norm.includes('address') ||
-    norm.includes('area') ||
-    norm.includes('site') ||
-    norm.includes('town') ||
-    norm.includes('state') ||
-    norm.includes('district')
-  ) {
-    return 'place';
-  }
-
-  // 7. Status / Pipeline Stage
-  if (
-    norm.includes('stage') ||
-    norm.includes('pipelin') ||
-    norm === 'status' ||
-    norm === 'leadstatus' ||
-    norm === 'currentstatus' ||
-    (norm.includes('status') &&
-      !norm.includes('status2') &&
-      !norm.includes('sub') &&
-      !norm.includes('note') &&
-      !norm.includes('remark') &&
-      !norm.includes('discussion'))
-  ) {
-    return 'status';
-  }
-
-  // 8. Discussion Notes / Sub-status / Remarks / Outcome
-  if (
-    norm.includes('note') ||
-    norm.includes('remark') ||
-    norm.includes('comment') ||
-    norm.includes('discussion') ||
-    norm.includes('outcome') ||
-    norm.includes('substatus') ||
-    norm.includes('status2') ||
-    norm.includes('update')
-  ) {
-    return 'status2';
-  }
-
-  // 9. Requirement / Details / Scope / Service
-  if (
-    norm.includes('require') ||
-    norm.includes('detail') ||
-    norm.includes('scope') ||
-    norm.includes('desc') ||
-    norm.includes('service') ||
-    norm.includes('project') ||
-    norm.includes('work') ||
-    norm.includes('item')
-  ) {
-    return 'requirement';
-  }
-
-  // 10. Platform / Source / Channel
-  if (
-    norm.includes('source') ||
-    norm.includes('platform') ||
-    norm.includes('channel') ||
-    norm.includes('medium') ||
-    norm.includes('campaign') ||
-    norm.includes('referrer')
-  ) {
-    return 'platform';
-  }
-
-  // 11. Reference / Referred By
-  if (norm.includes('ref') || norm.includes('refer')) {
-    return 'reference';
-  }
-
-  // 12. Category / Work Type
-  if (
-    norm.includes('cat') ||
-    norm.includes('type') ||
-    norm.includes('dept') ||
-    norm.includes('interior') ||
-    norm.includes('furniture')
-  ) {
-    return 'category';
-  }
-
-  // 13. Deal Value / Budget / Amount
-  if (
-    norm.includes('val') ||
-    norm.includes('budget') ||
-    norm.includes('amount') ||
-    norm.includes('cost') ||
-    norm.includes('price') ||
-    norm.includes('estimate') ||
-    norm.includes('revenue') ||
-    norm.includes('deal') ||
-    norm.includes('inr') ||
-    norm.includes('rs')
-  ) {
-    return 'dealValue' as any;
-  }
-
-  return 'custom';
+  const best = findBestFieldMatch(header || '');
+  if (!best) return 'custom';
+  const key = best.key as keyof Omit<Lead, 'rowIndex' | 'customFields' | 'history'>;
+  if (!key) return 'custom';
+  return key;
 }
 
 /**
@@ -608,6 +440,118 @@ export async function fetchSheetRows(
 }
 
 /**
+ * Detect header row within the first several rows and return index and confidence
+ */
+export function detectHeaderRow(rows: string[][], lookRows = 20): { headerRowIdx: number; confidence: number } {
+  if (!rows || rows.length === 0) return { headerRowIdx: 0, confidence: 0 };
+  const maxInspect = Math.min(rows.length, lookRows);
+  let bestIdx = 0;
+  let bestScore = -1;
+  for (let r = 0; r < maxInspect; r++) {
+    const row = rows[r] || [];
+    const textCells = row.filter((c) => c && String(c).trim().length > 0);
+    // heuristic signals
+    let score = 0;
+    // prefer rows with multiple short non-numeric values
+    const shortTextCount = textCells.filter((c) => String(c).trim().length > 0 && String(c).trim().length < 40 && !/\d{4,}/.test(String(c))).length;
+    score += shortTextCount * 2;
+    // prefer uniqueness in the row
+    const uniq = new Set(textCells.map((c) => String(c).toLowerCase().trim())).size;
+    score += Math.min(uniq, textCells.length);
+    // penalize rows with long numeric-like cells (likely data rows)
+    const numericLike = textCells.filter((c) => /\d/.test(String(c)) && String(c).trim().length > 6).length;
+    score -= numericLike;
+    // reward presence of known header tokens
+    const joined = textCells.join(' ').toLowerCase();
+    if (joined.includes('name') || joined.includes('phone') || joined.includes('email') || joined.includes('contact') || joined.includes('date') || joined.includes('status')) {
+      score += 3;
+    }
+
+    if (score > bestScore) {
+      bestScore = score;
+      bestIdx = r;
+    }
+  }
+
+  // Normalize confidence to 0..1 roughly
+  const confidence = Math.max(0, Math.min(1, Math.round((bestScore / (lookRows * 3)) * 100) / 100));
+  return { headerRowIdx: bestIdx, confidence };
+}
+
+/**
+ * Build mapping suggestions for headers with a simple confidence score
+ */
+export function buildHeaderMapping(headers: string[]): Record<string, { suggestedKey: string; confidence: number }> {
+  const mapping: Record<string, { suggestedKey: string; confidence: number }> = {};
+  headers.forEach((h) => {
+    const suggested = matchHeaderToKey(h);
+    let confidence = 0.5;
+    const norm = (h || '').toLowerCase();
+    if (!h || h.trim().length === 0) {
+      mapping[h] = { suggestedKey: 'custom', confidence: 0 };
+      return;
+    }
+    // strong signals
+    if (['name', 'contact', 'email', 'place', 'requirement', 'status', 'date', 'platform', 'reference', 'category'].includes(String(suggested))) {
+      confidence = 0.95;
+    }
+    // substring matches lower confidence
+    if (norm.includes('phone') || norm.includes('mobile') || norm.includes('whatsapp')) {
+      confidence = Math.max(confidence, 0.9);
+    }
+    if (norm.includes('email') || norm.includes('e-mail')) {
+      confidence = Math.max(confidence, 0.95);
+    }
+    // fallback for ambiguous headers
+    if (suggested === 'custom') confidence = 0.2;
+    mapping[h] = { suggestedKey: String(suggested), confidence };
+  });
+  return mapping;
+}
+
+/**
+ * Fetch a lightweight preview of a sheet: title, detected header row, headers, few sample rows and mapping suggestions
+ */
+export async function fetchSheetPreview(
+  spreadsheetId: string,
+  sheetName: string,
+  accessToken: string,
+  sampleRows = 10
+): Promise<{
+  title: string;
+  sheetName: string;
+  headerRowIdx: number;
+  headerConfidence: number;
+  headers: string[];
+  sample: string[][];
+  mappingSuggestions: Record<string, { suggestedKey: string; confidence: number }>;
+}> {
+  const cleanId = extractSpreadsheetId(spreadsheetId);
+  const { title, sheets } = await fetchSpreadsheetTabs(cleanId, accessToken);
+  const tab = sheetName || sheets[0] || 'Sheet1';
+  const range = formatSheetRange(tab, `A1:ZZ${Math.max(sampleRows, 20)}`);
+  const url = `https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(cleanId)}/values/${encodeURIComponent(range)}`;
+  const res = await fetch(url, {
+    headers: { Authorization: `Bearer ${accessToken}`, 'Content-Type': 'application/json' },
+  });
+  if (!res.ok) {
+    const errText = await res.text();
+    if (res.status === 401 || res.status === 403) {
+      throw new Error('Permission Denied (403/401) when previewing sheet.');
+    }
+    throw new Error(`Failed to fetch sheet preview (${res.status}): ${errText}`);
+  }
+  const data = await res.json();
+  const rows: string[][] = data.values || [];
+  const { headerRowIdx, confidence } = detectHeaderRow(rows, 20);
+  const rawHeaders = (rows[headerRowIdx] || []).map((h) => (h || '').trim());
+  const headers = rawHeaders.length ? rawHeaders : DEFAULT_HEADERS;
+  const sample = rows.slice(headerRowIdx + 1, headerRowIdx + 1 + sampleRows);
+  const mappingSuggestions = buildHeaderMapping(headers);
+  return { title: title || 'Google Sheet', sheetName: tab, headerRowIdx, headerConfidence: confidence, headers, sample, mappingSuggestions };
+}
+
+/**
  * Robustly sync spreadsheet data automatically detecting tab
  */
 export async function syncGoogleSheetData(
@@ -675,7 +619,8 @@ export function createGoogleCalendarUrl(lead: Lead): string {
 export async function syncOrCreateGoogleSheet(
   spreadsheetIdInput: string,
   accessToken: string,
-  selectedTabName?: string
+  selectedTabName?: string,
+  customMapping?: Record<string, string>
 ): Promise<{
   title: string;
   sheetName: string;
@@ -687,9 +632,9 @@ export async function syncOrCreateGoogleSheet(
   const cleanId = extractSpreadsheetId(spreadsheetIdInput);
 
   // 1. If it's a real ID and not the placeholder default ID, try to sync it directly
-  if (cleanId) {
+    if (cleanId) {
     try {
-      return await syncGoogleSheetData(cleanId, accessToken, selectedTabName);
+      return await syncGoogleSheetData(cleanId, accessToken, selectedTabName, customMapping);
     } catch (err: any) {
       if (err.message && (err.message.includes('401') || err.message.includes('403'))) {
         throw err;
@@ -710,10 +655,10 @@ export async function syncOrCreateGoogleSheet(
 
     if (searchRes.ok) {
       const searchData = await searchRes.json();
-      if (searchData.files && searchData.files.length > 0) {
+        if (searchData.files && searchData.files.length > 0) {
         const foundId = searchData.files[0].id;
         try {
-          return await syncGoogleSheetData(foundId, accessToken, selectedTabName);
+          return await syncGoogleSheetData(foundId, accessToken, selectedTabName, customMapping);
         } catch (e) {
           // ignore and fall through
         }
