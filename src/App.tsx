@@ -101,14 +101,21 @@ export default function App() {
     const unsubscribe = initAuth(
       async (user, token) => {
         // User is Firebase-authenticated
-          // If previous user exists and is different, clear prior user's Google/Sheets state
-          if (prevUserUidRef.current && prevUserUidRef.current !== user.uid) {
-            try {
-              showToast('Account switch detected: clearing previous Google Sheets state');
-            } catch (e) {}
-            resetGoogleAndSheetState();
-          }
-          setCurrentUser(user);
+        // Clear any in-memory sheet/lead state before loading this user's persisted state
+        // (do not clear Google auth tokens here, as the token may be provided by redirect flow)
+        try {
+          clearSheetState();
+        } catch (e) {}
+
+        // If previous user exists and is different, perform a full reset
+        if (prevUserUidRef.current && prevUserUidRef.current !== user.uid) {
+          try {
+            showToast('Account switch detected: clearing previous Google Sheets state');
+          } catch (e) {}
+          resetGoogleAndSheetState();
+        }
+
+        setCurrentUser(user);
         // Remove any unscoped demo/global lead state to avoid leaking other users' data into this session
         try {
           localStorage.removeItem('salesflow_leads_state');
@@ -261,6 +268,20 @@ export default function App() {
       try { localStorage.removeItem('google_spreadsheet_id'); } catch (e) {}
       try { localStorage.removeItem('google_sheet_tab'); } catch (e) {}
     } catch (e) {}
+  }, []);
+
+  // Clear only the in-memory sheet and lead state without touching Google auth token
+  const clearSheetState = React.useCallback(() => {
+    setLeads([]);
+    setHeaders(DEFAULT_HEADERS);
+    setSheetMetadata((prev) => ({
+      ...prev,
+      spreadsheetId: '',
+      sheetName: '',
+      availableSheets: [],
+      headers: DEFAULT_HEADERS,
+      isDemoMode: true,
+    }));
   }, []);
 
   useEffect(() => {
