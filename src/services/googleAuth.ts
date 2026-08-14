@@ -49,15 +49,33 @@ const provider = new GoogleAuthProvider();
 // We avoid broader drive scopes (drive.file, drive.readonly) unless the app later needs them.
 provider.addScope('https://www.googleapis.com/auth/spreadsheets');
 provider.addScope('https://www.googleapis.com/auth/drive.metadata.readonly');
+// Request basic OpenID/email scopes so we can verify which Google account
+// the access token belongs to. This ensures the OAuth token is explicitly
+// tied to a Google account email that we can compare against Firebase email.
+provider.addScope('openid');
+provider.addScope('email');
+provider.addScope('profile');
 // Request explicit consent and include granted scopes so the Drive browse UI works when required.
 provider.setCustomParameters({
-  prompt: 'consent',
-  access_type: 'offline',
+  prompt: 'select_account',
   include_granted_scopes: 'true',
 });
 
 let isSigningIn = false;
 let cachedAccessToken: string | null = null;
+let cachedAccessTokenUid: string | null = null;
+let cachedGoogleUser: { email?: string; sub?: string } | null = null;
+
+// Development-safe cleanup: remove legacy persisted token key if present
+try {
+  if (typeof window !== 'undefined' && window.localStorage) {
+    try {
+      window.localStorage.removeItem('google_sheets_token');
+    } catch (e) {
+      // ignore
+    }
+  }
+} catch (e) {}
 
 export const initAuth = (
   onAuthSuccess?: (user: User, token: string) => void,
@@ -69,7 +87,7 @@ export const initAuth = (
   let authStateFired = false;
 
   getRedirectResult(auth)
-    .then((result) => {
+    .then(async (result) => {
       // result is null if this is not a redirect from Google auth (e.g., normal page load or returning from logout)
       if (!result) {
         try {
@@ -82,25 +100,54 @@ export const initAuth = (
       const credential = GoogleAuthProvider.credentialFromResult(result);
       const token = credential?.accessToken ?? null;
       if (token) {
-        cachedAccessToken = token;
+        // Attempt to verify token ownership via Google userinfo before binding.
         try {
-          localStorage.setItem('google_sheets_token', token);
-        } catch (e) {}
-        // If a pending_connect was saved before redirect, process it
-        try {
-          const pending = localStorage.getItem('pending_connect');
-          if (pending) {
-            const p = JSON.parse(pending);
-            // store a flag so the app can pick this up and call the connector
-            localStorage.setItem('pending_connect_processed', JSON.stringify({ ...p, token }));
-            localStorage.removeItem('pending_connect');
+          const info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+            headers: { Authorization: `Bearer ${token}` },
+          }).then((r) => r.ok ? r.json() : null).catch(() => null);
+
+          if (info && info.email && result.user && result.user.email && info.email.toLowerCase() === String(result.user.email).toLowerCase()) {
+            cachedAccessToken = token;
+            cachedAccessTokenUid = result.user?.uid ?? null;
+            cachedGoogleUser = { email: info.email, sub: info.sub };
+            // Do NOT persist the token to localStorage. The app will be notified via onAuthSuccess.
+          } else {
+            // Token does not belong to the same Google account as the Firebase user.
+            cachedAccessToken = null;
+            cachedAccessTokenUid = null;
+            cachedGoogleUser = null;
+            try {
+              // eslint-disable-next-line no-console
+              console.info('Google auth redirect result: token owner mismatch', {
+                firebaseUid: result.user?.uid,
+                firebaseEmail: result.user?.email,
+                tokenGoogleEmail: info?.email ?? null,
+              });
+            } catch (e) {}
           }
-        } catch (e) {}
+        } catch (e) {
+          // If verification fails, do not bind the token.
+          cachedAccessToken = null;
+          cachedAccessTokenUid = null;
+          cachedGoogleUser = null;
+        }
       }
 
       // Notify success if we have both a Firebase user in the result and an access token
-      if (result.user && token && onAuthSuccess) {
-        onAuthSuccess(result.user, token);
+      if (result.user && onAuthSuccess) {
+        try {
+          // Diagnostics (do not log tokens)
+          // eslint-disable-next-line no-console
+          console.info('Google auth redirect result', {
+            firebaseUid: result.user.uid,
+            firebaseEmail: result.user.email,
+            providerId: 'google.com',
+            hasGoogleAccessToken: Boolean(cachedAccessToken),
+            tokenOwnerUid: cachedAccessTokenUid,
+            tokenGoogleEmail: cachedGoogleUser?.email ?? null,
+          });
+        } catch (e) {}
+        onAuthSuccess(result.user, cachedAccessToken ?? '');
       }
     })
     .catch((err) => {
@@ -115,12 +162,24 @@ export const initAuth = (
       if (authStateFired) {
         if (pendingUser) {
           if (cachedAccessToken && onAuthSuccess) {
+            try {
+              // Diagnostics (do not log tokens)
+              // eslint-disable-next-line no-console
+              console.info('Google auth state', {
+                firebaseUid: pendingUser.uid,
+                firebaseEmail: pendingUser.email,
+                providerId: 'google.com',
+                hasGoogleAccessToken: Boolean(cachedAccessToken),
+                tokenOwnerUid: cachedAccessTokenUid,
+              });
+            } catch (e) {}
             onAuthSuccess(pendingUser, cachedAccessToken);
           } else if (onAuthSuccess) {
             onAuthSuccess(pendingUser, '');
           }
         } else {
           cachedAccessToken = null;
+          cachedAccessTokenUid = null;
           if (onAuthFailure) {
             onAuthFailure();
           }
@@ -179,16 +238,29 @@ export const googleSignIn = async (): Promise<{
     const result = await signInWithPopup(auth, provider);
     const credential = GoogleAuthProvider.credentialFromResult(result);
     const token = credential?.accessToken ?? '';
-    
-    cachedAccessToken = token;
-    try {
-      if (token) localStorage.setItem('google_sheets_token', token);
-    } catch (e) {}
 
-    return {
-      user: result.user,
-      accessToken: token
-    };
+    // Verify the token belongs to the same Google account as the Firebase user
+    try {
+      const info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => r.ok ? r.json() : null).catch(() => null);
+
+      if (info && info.email && result.user && result.user.email && info.email.toLowerCase() === String(result.user.email).toLowerCase()) {
+        cachedAccessToken = token;
+        cachedAccessTokenUid = result.user?.uid ?? null;
+        cachedGoogleUser = { email: info.email, sub: info.sub };
+        return { user: result.user, accessToken: token };
+      }
+
+      // Ownership mismatch; do not bind token for this session
+      cachedAccessToken = null;
+      cachedAccessTokenUid = null;
+      cachedGoogleUser = null;
+      throw new Error(`Google account mismatch: OAuth token belongs to ${info?.email ?? 'an unknown account'}, which does not match Firebase user ${result.user?.email}`);
+    } catch (e) {
+      if (e instanceof Error) throw e;
+      throw new Error('Failed to verify Google account ownership for the OAuth token.');
+    }
   } catch (error: any) {
     if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')) {
       throw new Error('Sign-in popup was closed before completing authentication. Please click "Sign in with Google" to try again.');
@@ -217,25 +289,79 @@ export const googleSignIn = async (): Promise<{
 export const googleSignOut = async (): Promise<void> => {
   await signOut(auth);
   cachedAccessToken = null;
+  cachedAccessTokenUid = null;
+  cachedGoogleUser = null;
+  // Clear any pending redirect connection markers
+  try {
+    if (typeof window !== 'undefined' && window.localStorage) {
+      try {
+        window.localStorage.removeItem('pending_connect');
+      } catch (e) {}
+    }
+  } catch (e) {}
 };
 
 export const getAccessToken = (): string | null => {
-  if (cachedAccessToken) return cachedAccessToken;
-  try {
-    const stored = localStorage.getItem('google_sheets_token');
-    if (stored) {
-      cachedAccessToken = stored;
-      return stored;
-    }
-  } catch (e) {
-    // ignore
+  const currentUser = auth.currentUser;
+  if (!currentUser) {
+    cachedAccessToken = null;
+    cachedAccessTokenUid = null;
+    return null;
   }
-  return null;
+
+  if (!cachedAccessToken || cachedAccessTokenUid !== currentUser.uid) {
+    cachedAccessToken = null;
+    cachedAccessTokenUid = null;
+    return null;
+  }
+
+  // Ensure the Google OAuth token actually belongs to the same Google account
+  // as the currently signed-in Firebase user. If we do not have a verified
+  // Google user object, or the emails do not match, clear the cache.
+  if (!cachedGoogleUser || !cachedGoogleUser.email || String(cachedGoogleUser.email).toLowerCase() !== String(currentUser.email).toLowerCase()) {
+    cachedAccessToken = null;
+    cachedAccessTokenUid = null;
+    cachedGoogleUser = null;
+    return null;
+  }
+
+  return cachedAccessToken;
 };
 
 export const setAccessTokenManual = (token: string): void => {
   cachedAccessToken = token;
-  try {
-    localStorage.setItem('google_sheets_token', token);
-  } catch (e) {}
+  cachedAccessTokenUid = auth.currentUser?.uid ?? null;
+};
+
+export const getGoogleUser = (): { email?: string; sub?: string } | null => cachedGoogleUser;
+
+export const clearGoogleAuthState = (): void => {
+  cachedAccessToken = null;
+  cachedAccessTokenUid = null;
+  cachedGoogleUser = null;
+};
+
+export const verifyAndSetAccessToken = async (token: string): Promise<void> => {
+  // For manual tokens: verify userinfo and only bind if email matches Firebase user
+  const currentUser = auth.currentUser;
+  if (!currentUser) throw new Error('No signed-in Firebase user to bind token to');
+
+  const info = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+    headers: { Authorization: `Bearer ${token}` },
+  }).then((r) => r.ok ? r.json() : null).catch(() => null);
+
+  if (!info || !info.email) throw new Error('Unable to verify token: Google userinfo not available for this token');
+
+  if (String(info.email).toLowerCase() !== String(currentUser.email).toLowerCase()) {
+    // Do not bind token and provide clear error
+    cachedAccessToken = null;
+    cachedAccessTokenUid = null;
+    cachedGoogleUser = null;
+    throw new Error(`Google account mismatch. You are signed into Dcode Sales as ${currentUser.email}, but Google access was authorised for ${info.email}. Please sign out and reconnect using the same Google account.`);
+  }
+
+  // Bind token in-memory
+  cachedAccessToken = token;
+  cachedAccessTokenUid = currentUser.uid;
+  cachedGoogleUser = { email: info.email, sub: info.sub };
 };

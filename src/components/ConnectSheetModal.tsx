@@ -19,7 +19,7 @@ import {
   extractSpreadsheetId,
   listDriveSpreadsheets,
 } from '../services/googleSheets';
-import { googleSignIn, getAccessToken } from '../services/googleAuth';
+import { googleSignIn, getAccessToken, verifyAndSetAccessToken, getGoogleUser, clearGoogleAuthState } from '../services/googleAuth';
 
 interface ConnectSheetModalProps {
   isOpen: boolean;
@@ -103,7 +103,17 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     setTokenInfo(null);
     setErrorMsg('');
     try {
-      const token = tokenInput.trim() || getAccessToken();
+      let token = tokenInput.trim() || getAccessToken();
+      if (tokenInput.trim() && !getAccessToken()) {
+        // If user pasted a token, attempt to verify and bind it for this session
+        try {
+          await verifyAndSetAccessToken(tokenInput.trim());
+          token = tokenInput.trim();
+          setTokenInput(token);
+        } catch (err: any) {
+          throw err;
+        }
+      }
       if (!token) throw new Error('No access token available. Please sign in.');
       const res = await fetch(`https://www.googleapis.com/oauth2/v3/tokeninfo?access_token=${encodeURIComponent(token)}`);
       const data = await res.json();
@@ -120,7 +130,18 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     setSuccessMsg('');
     setIsBrowsingDrive(true);
     try {
-      const token = tokenInput.trim() || getAccessToken();
+      let token = tokenInput.trim() || getAccessToken();
+      if (tokenInput.trim() && !getAccessToken()) {
+        // Verify manual token before using it
+        try {
+          await verifyAndSetAccessToken(tokenInput.trim());
+          token = tokenInput.trim();
+          setTokenInput(token);
+        } catch (err: any) {
+          setErrorMsg(err.message || 'Token verification failed');
+          return;
+        }
+      }
       if (!token) throw new Error('Please sign in with Google first to browse Drive');
       const files = await listDriveSpreadsheets(token, 50, '');
       setDriveFiles(files);
@@ -134,7 +155,17 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
   const handleDriveSelect = async (fileId: string) => {
     setErrorMsg('');
     setSuccessMsg('');
-    const token = tokenInput.trim() || getAccessToken();
+    let token = tokenInput.trim() || getAccessToken();
+    if (tokenInput.trim() && !getAccessToken()) {
+      try {
+        await verifyAndSetAccessToken(tokenInput.trim());
+        token = tokenInput.trim();
+        setTokenInput(token);
+      } catch (err: any) {
+        setErrorMsg(err.message || 'Token verification failed');
+        return;
+      }
+    }
     if (!token) {
       setErrorMsg('Please sign in with Google first');
       return;
@@ -154,10 +185,20 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     setSuccessMsg('');
     try {
       let token = tokenInput.trim() || getAccessToken();
+      if (tokenInput.trim() && !getAccessToken()) {
+        try {
+          await verifyAndSetAccessToken(tokenInput.trim());
+          token = tokenInput.trim();
+          setTokenInput(token);
+        } catch (err: any) {
+          throw err;
+        }
+      }
       if (!token) {
         const authRes = await googleSignIn();
-        if (authRes?.accessToken) {
-          token = authRes.accessToken;
+        const verified = getAccessToken();
+        if (verified) {
+          token = verified;
           setTokenInput(token);
         } else {
           throw new Error('Please sign in with Google first to create a spreadsheet.');
@@ -188,7 +229,12 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     setSuccessMsg('');
 
     try {
-      const token = tokenInput.trim() || getAccessToken() || '';
+      let token = tokenInput.trim() || getAccessToken() || '';
+      if (tokenInput.trim() && !getAccessToken()) {
+        await verifyAndSetAccessToken(tokenInput.trim());
+        token = tokenInput.trim();
+        setTokenInput(token);
+      }
       const cleanId = extractSpreadsheetId(sheetId.trim());
       await onConnectToken(cleanId, token, selectedTab);
       setSuccessMsg('Successfully connected and synced with Google Sheet!');

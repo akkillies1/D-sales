@@ -15,7 +15,7 @@ import {
   appendHeaderColumn,
   clearRowInSheet,
 } from './services/googleSheets';
-import { googleSignIn, initAuth, googleSignOut } from './services/googleAuth';
+import { googleSignIn, initAuth, googleSignOut, getAccessToken, getGoogleUser, clearGoogleAuthState, verifyAndSetAccessToken } from './services/googleAuth';
 import { Sidebar } from './components/Sidebar';
 import { Header } from './components/Header';
 import { SUPPORT_PHONE_LINK, WHATSAPP_LINK } from './config';
@@ -76,30 +76,16 @@ export default function App() {
     }, 4000);
   };
 
-  // Check localStorage for saved token or custom fields on mount
+  // Check localStorage for demo-only custom fields on mount (per-user persisted state loads after auth)
   useEffect(() => {
     try {
-      const savedToken = localStorage.getItem('google_sheets_token');
-      const savedSheetId = localStorage.getItem('google_spreadsheet_id');
-      const savedTab = localStorage.getItem('google_sheet_tab');
-      if (savedToken && savedSheetId) {
-        setOauthToken(savedToken);
-        setSheetMetadata((prev) => ({
-          ...prev,
-          spreadsheetId: savedSheetId,
-          sheetName: savedTab || prev.sheetName,
-          isDemoMode: false,
-        }));
-        // only attempt sync if user is signed in; initAuth will call onAuthSuccess if available
-      } else {
-        const savedLeads = localStorage.getItem('salesflow_leads_state');
-        const savedHeaders = localStorage.getItem('salesflow_headers_state');
-        if (savedLeads) {
-          setLeads(JSON.parse(savedLeads));
-        }
-        if (savedHeaders) {
-          setHeaders(JSON.parse(savedHeaders));
-        }
+      const savedLeads = localStorage.getItem('salesflow_leads_state');
+      const savedHeaders = localStorage.getItem('salesflow_headers_state');
+      if (savedLeads) {
+        setLeads(JSON.parse(savedLeads));
+      }
+      if (savedHeaders) {
+        setHeaders(JSON.parse(savedHeaders));
       }
     } catch (e) {
       // ignore localStorage errors in sandbox
@@ -112,17 +98,34 @@ export default function App() {
       (user, token) => {
         // User is Firebase-authenticated
         setCurrentUser(user);
-        if (token) {
-          // Token is available (from fresh redirect or cache)
-          setOauthToken(token);
-          try {
-            localStorage.setItem('google_sheets_token', token);
-          } catch (e) {}
+        // Load per-user persisted leads/headers if present
+        try {
+          if (user && user.uid) {
+            const perLeads = localStorage.getItem(`salesflow_leads_state_${user.uid}`);
+            const perHeaders = localStorage.getItem(`salesflow_headers_state_${user.uid}`);
+            if (perLeads) setLeads(JSON.parse(perLeads));
+            if (perHeaders) setHeaders(JSON.parse(perHeaders));
+          }
+        } catch (e) {
+          // ignore
+        }
+        // Use authoritative accessor which enforces ownership check
+        const verified = getAccessToken();
+        if (verified) {
+          setOauthToken(verified);
         } else {
-          // User authenticated but no Google API token (yet)
-          // This is NOT an auth failure; the user can still use the app for manual entry
-          // or trigger a reconnect to Google Sheets
           setOauthToken('');
+          // If a token was returned by redirect but failed verification, inform user and clear persisted sheet
+          const googleUser = getGoogleUser();
+          if (token && googleUser && googleUser.email && user && user.email && String(googleUser.email).toLowerCase() !== String(user.email).toLowerCase()) {
+            try {
+              localStorage.removeItem(`google_spreadsheet_id_${user.uid}`);
+              localStorage.removeItem(`google_sheet_tab_${user.uid}`);
+            } catch (e) {}
+            showToast(`Google account mismatch. You are signed into Dcode Sales as ${user.email}, but Google access was authorised for ${googleUser.email}. Please sign out and reconnect using the same Google account.`);
+            // Clear any lingering google auth state
+            clearGoogleAuthState();
+          }
         }
       },
       () => {
@@ -130,7 +133,7 @@ export default function App() {
         setCurrentUser(null);
         setOauthToken('');
         try {
-          localStorage.removeItem('google_sheets_token');
+          localStorage.removeItem('pending_connect');
         } catch (e) {}
       }
     );
@@ -144,13 +147,13 @@ export default function App() {
     const tryAutoSync = async () => {
       try {
         // If redirect sign-in completed with a pending connect, handle it first
-        const pendingProcessed = localStorage.getItem('pending_connect_processed');
-        if (pendingProcessed) {
+        const pending = localStorage.getItem('pending_connect');
+        if (pending) {
           try {
-            const p = JSON.parse(pendingProcessed);
-            if (p && p.sheetId && p.token) {
-              await handleSyncWithGoogle(p.sheetId, p.token, p.selectedTab || undefined);
-              localStorage.removeItem('pending_connect_processed');
+            const p = JSON.parse(pending);
+            if (p && p.sheetId && currentUser && oauthToken) {
+              await handleSyncWithGoogle(p.sheetId, oauthToken, p.selectedTab || undefined);
+              localStorage.removeItem('pending_connect');
               return;
             }
           } catch (e) {
@@ -158,9 +161,23 @@ export default function App() {
           }
         }
 
-        const savedSheetId = localStorage.getItem('google_spreadsheet_id');
+        let savedSheetId: string | null = null;
+        if (currentUser) {
+          try {
+            savedSheetId = localStorage.getItem(`google_spreadsheet_id_${currentUser.uid}`);
+          } catch (e) {
+            savedSheetId = null;
+          }
+        }
         if (currentUser && oauthToken && savedSheetId) {
-          await handleSyncWithGoogle(savedSheetId, oauthToken, localStorage.getItem('google_sheet_tab') || undefined);
+          const savedTab = (() => {
+            try {
+              return localStorage.getItem(`google_sheet_tab_${currentUser.uid}`) || undefined;
+            } catch (e) {
+              return undefined;
+            }
+          })();
+          await handleSyncWithGoogle(savedSheetId, oauthToken, savedTab);
         }
       } catch (e) {
         // ignore
@@ -173,11 +190,14 @@ export default function App() {
   // Persist demo changes locally
   const persistState = (newLeads: Lead[], newHeaders: string[]) => {
     try {
-      localStorage.setItem('salesflow_leads_state', JSON.stringify(newLeads));
-      localStorage.setItem(
-        'salesflow_headers_state',
-        JSON.stringify(newHeaders)
-      );
+      if (currentUser && currentUser.uid) {
+        localStorage.setItem(`salesflow_leads_state_${currentUser.uid}`, JSON.stringify(newLeads));
+        localStorage.setItem(`salesflow_headers_state_${currentUser.uid}`, JSON.stringify(newHeaders));
+      } else {
+        // demo/local fallback
+        localStorage.setItem('salesflow_leads_state', JSON.stringify(newLeads));
+        localStorage.setItem('salesflow_headers_state', JSON.stringify(newHeaders));
+      }
     } catch (e) {
       // ignore
     }
@@ -189,14 +209,32 @@ export default function App() {
       const result = await googleSignIn();
       if (result) {
         setCurrentUser(result.user);
-        setOauthToken(result.accessToken);
-        try {
-          localStorage.setItem('google_sheets_token', result.accessToken);
-        } catch (e) {}
-        // optionally sync if spreadsheet id present
-        const savedSheetId = localStorage.getItem('google_spreadsheet_id');
-        if (savedSheetId) {
-          await handleSyncWithGoogle(savedSheetId, result.accessToken);
+        // Use authoritative accessor which enforces verified token and owner matching
+        const verified = getAccessToken();
+        if (!verified) {
+          const googleUser = getGoogleUser();
+          if (googleUser && googleUser.email) {
+            showToast(`Google account mismatch. You are signed into Dcode Sales as ${result.user.email}, but Google access was authorised for ${googleUser.email}. Please sign out and reconnect using the same Google account.`);
+            try {
+              localStorage.removeItem(`google_spreadsheet_id_${result.user.uid}`);
+              localStorage.removeItem(`google_sheet_tab_${result.user.uid}`);
+            } catch (e) {}
+            clearGoogleAuthState();
+          } else {
+            showToast('Google sign-in completed but token verification failed. Please try reconnecting.');
+          }
+        } else {
+          setOauthToken(verified);
+          // optionally sync if spreadsheet id present (per-user)
+          try {
+            const savedSheetId = localStorage.getItem(`google_spreadsheet_id_${result.user.uid}`);
+            const savedTab = localStorage.getItem(`google_sheet_tab_${result.user.uid}`) || undefined;
+            if (savedSheetId) {
+              await handleSyncWithGoogle(savedSheetId, verified, savedTab);
+            }
+          } catch (e) {
+            // ignore
+          }
         }
       }
     } catch (err: any) {
@@ -213,7 +251,8 @@ export default function App() {
     setCurrentUser(null);
     setOauthToken('');
     try {
-      localStorage.removeItem('google_sheets_token');
+      localStorage.removeItem('pending_connect');
+      localStorage.removeItem('pending_connect_processed');
     } catch (e) {}
   };
 
@@ -240,15 +279,31 @@ export default function App() {
         isDemoMode: false,
       }));
       try {
-        localStorage.setItem('google_sheets_token', token);
-        localStorage.setItem('google_spreadsheet_id', result.spreadsheetId);
-        if (result.sheetName) {
-          localStorage.setItem('google_sheet_tab', result.sheetName);
+        if (currentUser?.uid) {
+          localStorage.setItem(`google_spreadsheet_id_${currentUser.uid}`, result.spreadsheetId);
+          if (result.sheetName) {
+            localStorage.setItem(`google_sheet_tab_${currentUser.uid}`, result.sheetName);
+          }
         }
       } catch (e) {}
       showToast(`Synced successfully with Google Sheet "${result.title}" (${result.sheetName})!`);
     } catch (err: any) {
-      showToast(`Sheet Sync Notice: ${err.message || 'Using offline demo data'}`);
+      const msg = err?.message || '';
+      showToast(`Sheet Sync Notice: ${msg || 'Using offline demo data'}`);
+      // If Google indicates unauthorized or forbidden, invalidate Google auth state
+      if (String(msg).includes('401') || String(msg).includes('403') || String(msg).toLowerCase().includes('permission denied')) {
+        try {
+          clearGoogleAuthState();
+          setOauthToken('');
+          if (currentUser?.uid) {
+            try {
+              localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
+              localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
+            } catch (e) {}
+          }
+          showToast('Google authorization expired or revoked. Please reconnect Google to continue.');
+        } catch (e) {}
+      }
     } finally {
       setIsLoading(false);
     }
@@ -275,7 +330,20 @@ export default function App() {
           setSheetMetadata((prev) => ({ ...prev, lastSynced: new Date() }));
         }
       } catch (e) {
-        // quiet background catch
+        const msg = (e as any)?.message || '';
+        if (String(msg).includes('401') || String(msg).includes('403') || String(msg).toLowerCase().includes('permission denied')) {
+          try {
+            clearGoogleAuthState();
+            setOauthToken('');
+            if (currentUser?.uid) {
+              try {
+                localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
+                localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
+              } catch (err) {}
+            }
+            showToast('Google authorization expired or revoked. Please reconnect Google to continue.');
+          } catch (err) {}
+        }
       }
     }, intervalSec * 1000);
 
