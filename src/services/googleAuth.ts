@@ -1,7 +1,7 @@
 import { initializeApp, getApps, getApp } from 'firebase/app';
 import {
   getAuth,
-  // signInWithPopup,
+  signInWithPopup,
   signInWithRedirect,
   getRedirectResult,
   GoogleAuthProvider,
@@ -176,10 +176,19 @@ export const googleSignIn = async (): Promise<{
 } | null> => {
   try {
     isSigningIn = true;
-    // Use redirect flow to avoid popup/COOP issues in some browsers / deployments
-    await signInWithRedirect(auth, provider);
-    // The redirect will leave the page; result will be processed on app load via getRedirectResult
-    return null;
+    const result = await signInWithPopup(auth, provider);
+    const credential = GoogleAuthProvider.credentialFromResult(result);
+    const token = credential?.accessToken ?? '';
+    
+    cachedAccessToken = token;
+    try {
+      if (token) localStorage.setItem('google_sheets_token', token);
+    } catch (e) {}
+
+    return {
+      user: result.user,
+      accessToken: token
+    };
   } catch (error: any) {
     if (error?.code === 'auth/popup-closed-by-user' || error?.message?.includes('popup-closed-by-user')) {
       throw new Error('Sign-in popup was closed before completing authentication. Please click "Sign in with Google" to try again.');
