@@ -110,17 +110,28 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = initAuth(
       (user, token) => {
+        // User is Firebase-authenticated
         setCurrentUser(user);
         if (token) {
+          // Token is available (from fresh redirect or cache)
           setOauthToken(token);
           try {
             localStorage.setItem('google_sheets_token', token);
           } catch (e) {}
+        } else {
+          // User authenticated but no Google API token (yet)
+          // This is NOT an auth failure; the user can still use the app for manual entry
+          // or trigger a reconnect to Google Sheets
+          setOauthToken('');
         }
       },
       () => {
+        // Only called when user is actually signed out (Firebase auth failure)
         setCurrentUser(null);
         setOauthToken('');
+        try {
+          localStorage.removeItem('google_sheets_token');
+        } catch (e) {}
       }
     );
     return () => {

@@ -135,10 +135,11 @@ export const initAuth = (
       }
 
       // Redirect processing finished and we do not have an OAuth access token.
-      // Call onAuthFailure so the app can show the connector flow, but this does
-      // NOT mean the Firebase user is signed out.
-      if (onAuthFailure) {
-        onAuthFailure();
+      // The user IS Firebase-authenticated, but Google API authorization is pending.
+      // Report success with an empty token so the app knows the user is signed in
+      // and can show the Google connect/reauthorize flow as needed.
+      if (onAuthSuccess) {
+        onAuthSuccess(user, '');
       }
     } else {
       // No Firebase user -> fully unauthenticated
