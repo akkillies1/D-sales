@@ -228,7 +228,7 @@ export default function App() {
       return;
     }
 
-    // Passed validation — set state
+    // Passed validation — keep the synced lead list intact and only update metadata.
     setSheetMetadata((prev) => ({
       ...prev,
       spreadsheetId: opts.spreadsheetId,
@@ -239,7 +239,6 @@ export default function App() {
       lastSynced: new Date(),
       isDemoMode: false,
     }));
-    setLeads([]); // will be populated by caller after sync
     setHeaders(opts.headers || DEFAULT_HEADERS);
   }, []);
   const resetGoogleAndSheetState = React.useCallback(() => {

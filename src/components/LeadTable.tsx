@@ -1,8 +1,9 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Lead } from '../types';
 import { DEFAULT_HEADERS } from '../services/googleSheets';
 import { Edit2, Phone, MapPin, Calendar, Tag, Trash2, ArrowUpDown, MessageSquare } from 'lucide-react';
 import { buildWhatsAppUrl, buildCallUrl } from '../utils/phone';
+import { shouldUseMobileLeadLayout } from '../utils/leadLayout';
 
 interface LeadTableProps {
   leads: Lead[];
@@ -19,9 +20,17 @@ export const LeadTable: React.FC<LeadTableProps> = ({
   onDeleteLead,
 }) => {
   const [currentPage, setCurrentPage] = useState(1);
-  const [itemsPerPage, setItemsPerPage] = useState<number | 'all'>(25);
+  const [itemsPerPage, setItemsPerPage] = useState<number | 'all'>(10);
   const [sortField, setSortField] = useState<'date' | 'name' | 'place'>('date');
   const [sortAsc, setSortAsc] = useState(false);
+  const [isMobileLayout, setIsMobileLayout] = useState(false);
+
+  useEffect(() => {
+    const updateLayout = () => setIsMobileLayout(shouldUseMobileLeadLayout(window.innerWidth));
+    updateLayout();
+    window.addEventListener('resize', updateLayout);
+    return () => window.removeEventListener('resize', updateLayout);
+  }, []);
 
   // Identify any custom columns beyond standard headers
   const customHeaders = headers.filter(
@@ -88,6 +97,144 @@ export const LeadTable: React.FC<LeadTableProps> = ({
       </span>
     );
   };
+
+  const renderLeadCard = (lead: Lead) => (
+    <article
+      key={lead.rowIndex}
+      className="rounded-2xl border border-zinc-800 bg-zinc-950/80 p-3 shadow-lg"
+      onClick={() => onEditLead(lead)}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2 text-xs text-zinc-500">
+            <span className="font-mono">#{lead.slNo || lead.rowIndex}</span>
+            <span>•</span>
+            <span>{lead.date || '—'}</span>
+          </div>
+          <div className="mt-2 font-semibold text-zinc-100">{lead.name}</div>
+          {lead.contact && (
+            <div className="mt-1 text-xs text-zinc-400">{lead.contact}</div>
+          )}
+          <div className="mt-2 flex items-center gap-2 text-xs text-zinc-300">
+            <MapPin className="w-3.5 h-3.5 text-zinc-500 shrink-0" />
+            <span>{lead.place || '—'}</span>
+          </div>
+        </div>
+        <div className="flex flex-col gap-2 shrink-0">
+          <button
+            onClick={(e) => { e.stopPropagation(); onEditLead(lead); }}
+            className="p-2 rounded-lg text-blue-400 bg-zinc-900 border border-zinc-800"
+            title="Edit lead"
+          >
+            <Edit2 className="w-4 h-4" />
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); onDeleteLead(lead); }}
+            className="p-2 rounded-lg text-red-400 bg-zinc-900 border border-zinc-800"
+            title="Delete lead"
+          >
+            <Trash2 className="w-4 h-4" />
+          </button>
+        </div>
+      </div>
+
+      <div className="mt-3 space-y-2 text-xs text-zinc-300">
+        <div className="flex items-start gap-2">
+          <Tag className="w-3.5 h-3.5 text-blue-400 mt-0.5" />
+          <span>{lead.requirement || '—'}</span>
+        </div>
+        <div className="flex items-center justify-between gap-3">
+          <span className="text-zinc-400">Status</span>
+          {renderStatusChip(lead.status, lead.status2)}
+        </div>
+        {lead.followUpDate && (
+          <div className="flex items-center justify-between gap-3">
+            <span className="text-zinc-400">Follow-up</span>
+            <span className="font-mono text-zinc-300">{lead.followUpDate}</span>
+          </div>
+        )}
+      </div>
+
+      <div className="mt-3 flex items-center justify-between gap-2 border-t border-zinc-800 pt-3">
+        {(() => {
+          const wa = buildWhatsAppUrl(lead.contact, lead.name);
+          return (
+            <button
+              onClick={(e) => { e.stopPropagation(); if (wa) window.open(wa, '_blank', 'noopener,noreferrer'); }}
+              disabled={!wa}
+              className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium ${wa ? 'border-emerald-500/40 bg-emerald-500/10 text-emerald-300' : 'border-zinc-800 bg-zinc-900 text-zinc-600 opacity-40'}`}
+            >
+              WhatsApp
+            </button>
+          );
+        })()}
+        {(() => {
+          const call = buildCallUrl(lead.contact);
+          return (
+            <button
+              onClick={(e) => { e.stopPropagation(); if (call) window.location.href = call; }}
+              disabled={!call}
+              className={`flex-1 rounded-lg border px-2 py-2 text-xs font-medium ${call ? 'border-zinc-700 bg-zinc-900 text-zinc-200' : 'border-zinc-800 bg-zinc-900 text-zinc-600 opacity-40'}`}
+            >
+              Call
+            </button>
+          );
+        })()}
+      </div>
+    </article>
+  );
+
+  if (isMobileLayout) {
+    return (
+      <div className="flex-1 glass rounded-2xl overflow-hidden flex flex-col border border-zinc-800/80 shadow-2xl min-w-0">
+        <div className="p-3 border-b border-zinc-800 bg-zinc-900/40 flex items-center justify-between gap-2">
+          <span className="text-xs text-zinc-400">{displayLeads.length} shown</span>
+          <select
+            value={itemsPerPage}
+            onChange={(e) => {
+              const val = e.target.value === 'all' ? 'all' : Number(e.target.value);
+              setItemsPerPage(val);
+              setCurrentPage(1);
+            }}
+            className="bg-zinc-900 border border-zinc-700 rounded px-2 py-1.5 text-xs text-zinc-200"
+          >
+            <option value={5}>5</option>
+            <option value={10}>10</option>
+            <option value={25}>25</option>
+            <option value="all">All</option>
+          </select>
+        </div>
+        <div className="flex-1 overflow-y-auto p-3 space-y-3">
+          {displayLeads.length === 0 ? (
+            <div className="rounded-2xl border border-dashed border-zinc-700 bg-zinc-950/40 p-8 text-center text-sm text-zinc-500">
+              No leads match the current filters.
+            </div>
+          ) : (
+            displayLeads.map(renderLeadCard)
+          )}
+        </div>
+        {itemsPerPage !== 'all' && totalPages > 1 && (
+          <footer className="border-t border-zinc-800 bg-zinc-900/40 p-3 flex items-center justify-between gap-2">
+            <button
+              disabled={currentPage === 1}
+              onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+              className="flex-1 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 disabled:opacity-40"
+            >
+              Prev
+            </button>
+            <span className="text-xs text-zinc-400">{currentPage}/{totalPages}</span>
+            <button
+              disabled={currentPage === totalPages}
+              onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+              className="flex-1 rounded-lg bg-zinc-800 px-3 py-2 text-xs font-medium text-zinc-200 disabled:opacity-40"
+            >
+              Next
+            </button>
+          </footer>
+        )}
+      </div>
+    );
+  }
 
   return (
     <div className="flex-1 glass rounded-2xl overflow-hidden flex flex-col border border-zinc-800/80 shadow-2xl min-w-0">
