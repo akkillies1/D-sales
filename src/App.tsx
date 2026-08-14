@@ -81,15 +81,10 @@ export default function App() {
   // Check localStorage for demo-only custom fields on mount (per-user persisted state loads after auth)
   useEffect(() => {
     try {
-      const savedLeads = localStorage.getItem('salesflow_leads_state');
-      const savedHeaders = localStorage.getItem('salesflow_headers_state');
-      if (savedLeads) {
-        setLeads(JSON.parse(savedLeads));
-      }
-      if (savedHeaders) {
-        setHeaders(JSON.parse(savedHeaders));
-      }
-      // One-time cleanup: remove legacy global keys that could carry another user's sheet
+      // IMPORTANT: do NOT auto-load per-user data from unscoped global keys to avoid cross-account leakage.
+      // Only load per-user state once Firebase auth establishes the current user (handled elsewhere).
+      // However, if the app is explicitly running in demo/offline mode, it may use demo keys.
+      // For safety, remove legacy global sheet keys that might contain other users' data.
       try {
         localStorage.removeItem('google_spreadsheet_id');
         localStorage.removeItem('google_sheet_tab');
@@ -114,6 +109,11 @@ export default function App() {
             resetGoogleAndSheetState();
           }
           setCurrentUser(user);
+        // Remove any unscoped demo/global lead state to avoid leaking other users' data into this session
+        try {
+          localStorage.removeItem('salesflow_leads_state');
+          localStorage.removeItem('salesflow_headers_state');
+        } catch (e) {}
         // Load per-user persisted leads/headers if present
         try {
           if (user && user.uid) {
