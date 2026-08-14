@@ -959,6 +959,7 @@ export default function App() {
         onClose={() => setIsColumnMapperOpen(false)}
         headers={headers}
         sheetHeaders={headers}
+        leads={leads}
         currentMapping={sheetMetadata.customColumnMapping || {}}
         onSaveMapping={(newMapping) => {
           setSheetMetadata((prev) => ({ ...prev, customColumnMapping: newMapping }));

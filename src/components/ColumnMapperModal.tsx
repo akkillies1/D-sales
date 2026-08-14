@@ -8,6 +8,7 @@ interface ColumnMapperModalProps {
   onClose: () => void;
   headers?: string[];
   sheetHeaders?: string[];
+  leads?: Lead[];
   currentMapping?: Record<string, string>;
   onSaveMapping: (mapping: Record<string, keyof Omit<Lead, 'rowIndex' | 'customFields' | 'history'>>) => void;
 }
@@ -34,6 +35,7 @@ export const ColumnMapperModal: React.FC<ColumnMapperModalProps> = ({
   onClose,
   headers,
   sheetHeaders,
+  leads,
   currentMapping = {},
   onSaveMapping,
 }) => {
@@ -50,6 +52,20 @@ export const ColumnMapperModal: React.FC<ColumnMapperModalProps> = ({
   });
 
   if (!isOpen) return null;
+
+  // Build a small preview of how the current mapping would map into Lead fields using example leads
+  const previewRows = (leads || []).slice(0, 4).map((lead) => {
+    const row: Record<string, string> = {};
+    activeHeaders.forEach((h) => {
+      const key = mapping[h] || 'custom';
+      if (key && key !== 'custom' && (lead as any)[key] !== undefined) {
+        row[h] = String((lead as any)[key] ?? '');
+      } else {
+        row[h] = String(lead.customFields?.[h] ?? '');
+      }
+    });
+    return row;
+  });
 
   const handleFieldChange = (header: string, selectedKey: string) => {
     setMapping((prev) => ({
@@ -107,6 +123,35 @@ export const ColumnMapperModal: React.FC<ColumnMapperModalProps> = ({
           </div>
 
           <div className="space-y-3 pt-2">
+            {/* Live mapping preview */}
+            <div className="bg-black/40 border border-zinc-800 rounded-xl p-3 mb-3 text-xs">
+              <div className="text-xs text-zinc-400 mb-2">Live Mapping Preview (first {previewRows.length} leads)</div>
+              <div className="overflow-auto">
+                <table className="w-full text-left text-[12px] border-collapse">
+                  <thead>
+                    <tr>
+                      {activeHeaders.slice(0,8).map((h) => (
+                        <th key={h} className="px-2 py-1 border-b border-zinc-800 text-zinc-300">{h}</th>
+                      ))}
+                    </tr>
+                    <tr>
+                      {activeHeaders.slice(0,8).map((h) => (
+                        <th key={h} className="px-2 py-1 border-b border-zinc-800 text-zinc-400 font-mono text-xs">{String(mapping[h] || 'custom')}</th>
+                      ))}
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {previewRows.map((r, ri) => (
+                      <tr key={ri}>
+                        {activeHeaders.slice(0,8).map((h) => (
+                          <td key={h} className="px-2 py-1 align-top text-zinc-300">{r[h] || ''}</td>
+                        ))}
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
             {(activeHeaders || []).map((header) => {
               const currentVal = mapping[header] || 'custom';
               return (

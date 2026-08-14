@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "vite --port=3000 --host=0.0.0.0",
     "build": "vite build",
+    "test": "vitest run",
     "preview": "vite preview",
     "generate-sw": "workbox generateSW workbox-config.js",
     "clean": "rm -rf dist server.js",
@@ -27,6 +28,7 @@
   },
   "devDependencies": {
     "@types/node": "^22.14.0",
+    "vitest": "^1.0.0",
     "autoprefixer": "^10.4.21",
     "esbuild": "^0.25.0",
     "tailwindcss": "^4.1.14",
