@@ -14,6 +14,7 @@ import {
   updateRowInSheet,
   appendHeaderColumn,
   clearRowInSheet,
+  listDriveSpreadsheets,
 } from './services/googleSheets';
 import { googleSignIn, initAuth, googleSignOut, getAccessToken, getGoogleUser, clearGoogleAuthState, verifyAndSetAccessToken } from './services/googleAuth';
 import { Sidebar } from './components/Sidebar';
@@ -142,6 +143,48 @@ export default function App() {
     };
   }, []);
 
+  // Track previous Firebase UID to detect account switches and fully reset Google/Sheets state
+  const prevUserUidRef = React.useRef<string | null>(null);
+  const resetGoogleAndSheetState = React.useCallback(() => {
+    try {
+      clearGoogleAuthState();
+    } catch (e) {}
+    setOauthToken('');
+    setLeads([]);
+    setHeaders(DEFAULT_HEADERS);
+    setSheetMetadata((prev) => ({
+      ...prev,
+      spreadsheetId: DEFAULT_SPREADSHEET_ID,
+      sheetName: 'Sheet1',
+      availableSheets: [],
+      headers: DEFAULT_HEADERS,
+      isDemoMode: true,
+    }));
+    try {
+      if (prevUserUidRef.current) {
+        localStorage.removeItem(`google_spreadsheet_id_${prevUserUidRef.current}`);
+        localStorage.removeItem(`google_sheet_tab_${prevUserUidRef.current}`);
+      }
+    } catch (e) {}
+  }, []);
+
+  useEffect(() => {
+    const prev = prevUserUidRef.current;
+    const curr = currentUser?.uid ?? null;
+    if (prev && prev !== curr) {
+      // Firebase user changed — clear any Google/Sheets state tied to previous user
+      try {
+        showToast('Account change detected: clearing Google Sheets state');
+      } catch (e) {}
+      resetGoogleAndSheetState();
+    }
+    if (!currentUser && prev) {
+      // Signed out — clear state
+      resetGoogleAndSheetState();
+    }
+    prevUserUidRef.current = curr;
+  }, [currentUser, resetGoogleAndSheetState]);
+
   // When signed in and we have a saved spreadsheet id + token, auto-sync once
   useEffect(() => {
     const tryAutoSync = async () => {
@@ -170,14 +213,33 @@ export default function App() {
           }
         }
         if (currentUser && oauthToken && savedSheetId) {
-          const savedTab = (() => {
-            try {
-              return localStorage.getItem(`google_sheet_tab_${currentUser.uid}`) || undefined;
-            } catch (e) {
-              return undefined;
+          // Verify savedSheetId is actually present in the current Google account's Drive
+          try {
+            const files = await listDriveSpreadsheets(oauthToken, 100, '');
+            const found = files.some((f) => f.id === savedSheetId);
+            if (found) {
+              const savedTab = (() => {
+                try {
+                  return localStorage.getItem(`google_sheet_tab_${currentUser.uid}`) || undefined;
+                } catch (e) {
+                  return undefined;
+                }
+              })();
+              await handleSyncWithGoogle(savedSheetId, oauthToken, savedTab);
+            } else {
+              // Saved sheet not present in Drive for this Google account: remove persisted keys
+              try {
+                localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
+                localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
+              } catch (e) {}
             }
-          })();
-          await handleSyncWithGoogle(savedSheetId, oauthToken, savedTab);
+          } catch (e) {
+            // If Drive listing failed, be conservative and do not auto-restore saved sheet
+            try {
+              localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
+              localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
+            } catch (err) {}
+          }
         }
       } catch (e) {
         // ignore

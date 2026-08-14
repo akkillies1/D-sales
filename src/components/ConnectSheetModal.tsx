@@ -65,6 +65,8 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     if (isOpen) {
       setSheetId(sheetMetadata.spreadsheetId || DEFAULT_SPREADSHEET_ID);
       setSelectedTab(sheetMetadata.sheetName || 'Sheet1');
+      // Clear any previously loaded Drive files when opening modal
+      setDriveFiles([]);
       const cached = getAccessToken();
       if (cached && !tokenInput) {
         setTokenInput(cached);
