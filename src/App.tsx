@@ -963,9 +963,9 @@ export default function App() {
         currentMapping={sheetMetadata.customColumnMapping || {}}
         onSaveMapping={(newMapping) => {
           setSheetMetadata((prev) => ({ ...prev, customColumnMapping: newMapping }));
-          // Re-trigger sync with new column mapping if connected
+          // Re-trigger sync with new column mapping if connected — pass the mapping so it is used immediately
           if (oauthToken && sheetMetadata.spreadsheetId) {
-            handleSyncWithGoogle(sheetMetadata.spreadsheetId, oauthToken, sheetMetadata.sheetName);
+            handleSyncWithGoogle(sheetMetadata.spreadsheetId, oauthToken, sheetMetadata.sheetName, newMapping);
           } else {
             showToast('Custom column mapping saved successfully!');
           }
