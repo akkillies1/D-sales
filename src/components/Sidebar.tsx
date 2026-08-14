@@ -193,7 +193,9 @@ export const Sidebar: React.FC<SidebarProps> = ({
           </div>
 
           <p className="text-[11px] text-zinc-400 truncate font-mono">
-            ID: {sheetMetadata.spreadsheetId.slice(0, 10)}...
+            {sheetMetadata.spreadsheetId && !sheetMetadata.isDemoMode
+              ? `ID: ${sheetMetadata.spreadsheetId.slice(0, 10)}...`
+              : 'No Google Sheet connected'}
           </p>
 
           <div className="flex items-center space-x-2 pt-1">
@@ -216,15 +218,19 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 <LogOut className="w-3.5 h-3.5" />
               </button>
             )}
-            <a
-              href={`https://docs.google.com/spreadsheets/d/${sheetMetadata.spreadsheetId}/edit`}
-              target="_blank"
-              rel="noopener noreferrer"
-              title="Open Google Sheet in new tab"
-              className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg border border-zinc-700 transition-colors"
-            >
-              <ExternalLink className="w-3.5 h-3.5" />
-            </a>
+            {sheetMetadata.spreadsheetId && !sheetMetadata.isDemoMode ? (
+              <a
+                href={`https://docs.google.com/spreadsheets/d/${sheetMetadata.spreadsheetId}/edit`}
+                target="_blank"
+                rel="noopener noreferrer"
+                title="Open Google Sheet in new tab"
+                className="p-1.5 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 rounded-lg border border-zinc-700 transition-colors"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+              </a>
+            ) : (
+              <div className="p-1.5 bg-zinc-800 text-zinc-600 rounded-lg border border-zinc-800 text-[11px]">Connect</div>
+            )}
           </div>
         </div>
       </div>

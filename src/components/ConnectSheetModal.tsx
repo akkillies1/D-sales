@@ -14,7 +14,6 @@ import {
 } from 'lucide-react';
 import { Lead, SheetMetadata } from '../types';
 import {
-  DEFAULT_SPREADSHEET_ID,
   createSampleSpreadsheet,
   extractSpreadsheetId,
   listDriveSpreadsheets,
@@ -47,7 +46,7 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
   onChangeAutoSyncInterval,
 }) => {
   const [sheetId, setSheetId] = useState(
-    sheetMetadata.spreadsheetId || DEFAULT_SPREADSHEET_ID
+    sheetMetadata.spreadsheetId || ''
   );
   const [selectedTab, setSelectedTab] = useState(sheetMetadata.sheetName || 'Sheet1');
   const [tokenInput, setTokenInput] = useState('');
@@ -63,7 +62,7 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
 
   useEffect(() => {
     if (isOpen) {
-      setSheetId(sheetMetadata.spreadsheetId || DEFAULT_SPREADSHEET_ID);
+      setSheetId(sheetMetadata.spreadsheetId || '');
       setSelectedTab(sheetMetadata.sheetName || 'Sheet1');
       // Clear any previously loaded Drive files when opening modal
       setDriveFiles([]);
@@ -81,7 +80,7 @@ export const ConnectSheetModal: React.FC<ConnectSheetModalProps> = ({
     setErrorMsg('');
     setSuccessMsg('');
     try {
-      const cleanId = extractSpreadsheetId(sheetId || DEFAULT_SPREADSHEET_ID);
+      const cleanId = extractSpreadsheetId(sheetId || '');
       // Save pending connect request to localStorage so it can be completed after redirect
       try {
         localStorage.setItem('pending_connect', JSON.stringify({ sheetId: cleanId, selectedTab }));

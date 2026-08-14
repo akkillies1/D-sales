@@ -6,7 +6,6 @@ import {
   FilterState,
 } from './types';
 import {
-  DEFAULT_SPREADSHEET_ID,
   DEFAULT_HEADERS,
   syncOrCreateGoogleSheet,
   syncGoogleSheetData,
@@ -15,6 +14,7 @@ import {
   appendHeaderColumn,
   clearRowInSheet,
   listDriveSpreadsheets,
+  fetchSpreadsheetTabs,
 } from './services/googleSheets';
 import { googleSignIn, initAuth, googleSignOut, getAccessToken, getGoogleUser, clearGoogleAuthState, verifyAndSetAccessToken } from './services/googleAuth';
 import { Sidebar } from './components/Sidebar';
@@ -36,13 +36,14 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<ActiveTab>('table');
   const [leads, setLeads] = useState<Lead[]>([]);
   const [headers, setHeaders] = useState<string[]>(DEFAULT_HEADERS);
+  // Start with an explicit disconnected state (no global/default spreadsheet)
   const [sheetMetadata, setSheetMetadata] = useState<SheetMetadata>({
-    spreadsheetId: DEFAULT_SPREADSHEET_ID,
-    title: 'SalesFlow Pro CRM Sheet',
-    sheetName: 'Sheet1',
+    spreadsheetId: '',
+    title: '',
+    sheetName: '',
     headers: DEFAULT_HEADERS,
     lastSynced: new Date(),
-    isDemoMode: false,
+    isDemoMode: true,
     autoSyncInterval: 30,
   });
   const [oauthToken, setOauthToken] = useState<string>('');
@@ -88,6 +89,13 @@ export default function App() {
       if (savedHeaders) {
         setHeaders(JSON.parse(savedHeaders));
       }
+      // One-time cleanup: remove legacy global keys that could carry another user's sheet
+      try {
+        localStorage.removeItem('google_spreadsheet_id');
+        localStorage.removeItem('google_sheet_tab');
+        localStorage.removeItem('google_sheets_token');
+        localStorage.removeItem('pending_connect_processed');
+      } catch (e) {}
     } catch (e) {
       // ignore localStorage errors in sandbox
     }
@@ -98,7 +106,14 @@ export default function App() {
     const unsubscribe = initAuth(
       (user, token) => {
         // User is Firebase-authenticated
-        setCurrentUser(user);
+          // If previous user exists and is different, clear prior user's Google/Sheets state
+          if (prevUserUidRef.current && prevUserUidRef.current !== user.uid) {
+            try {
+              showToast('Account switch detected: clearing previous Google Sheets state');
+            } catch (e) {}
+            resetGoogleAndSheetState();
+          }
+          setCurrentUser(user);
         // Load per-user persisted leads/headers if present
         try {
           if (user && user.uid) {
@@ -145,6 +160,76 @@ export default function App() {
 
   // Track previous Firebase UID to detect account switches and fully reset Google/Sheets state
   const prevUserUidRef = React.useRef<string | null>(null);
+  // Central setter for assigning a connected spreadsheet (single source of truth)
+  const setConnectedSpreadsheet = React.useCallback(async (opts: {
+    firebaseUid: string | null;
+    firebaseEmail: string | null;
+    googleEmail: string | null;
+    spreadsheetId: string;
+    title?: string;
+    sheetName?: string;
+    availableSheets?: string[];
+    headers?: string[];
+    source?: string;
+  }) => {
+    // Development-only debug log
+    try {
+      // eslint-disable-next-line no-console
+      console.info('[SheetsDebug] spreadsheet state changed', {
+        firebaseUid: opts.firebaseUid,
+        firebaseEmail: opts.firebaseEmail,
+        googleEmail: opts.googleEmail,
+        spreadsheetId: opts.spreadsheetId,
+        source: opts.source || 'UNKNOWN',
+      });
+    } catch (e) {}
+
+    // Verify prerequisites
+    if (!opts.firebaseUid || !opts.firebaseEmail) {
+      // invalid assignment
+      return;
+    }
+    // Must have a verified Google identity matching Firebase email
+    const gUser = getGoogleUser();
+    if (!gUser || !gUser.email || String(gUser.email).toLowerCase() !== String(opts.firebaseEmail).toLowerCase()) {
+      // do not assign
+      return;
+    }
+
+    // Validate spreadsheet really accessible with current token via Sheets API
+    const token = getAccessToken();
+    if (!token) return;
+    try {
+      await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(opts.spreadsheetId)}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      }).then((r) => {
+        if (!r.ok) throw new Error('Spreadsheet validation failed');
+      });
+    } catch (e) {
+      // validation failed — clear any persisted keys for this user
+      try {
+        if (opts.firebaseUid) {
+          localStorage.removeItem(`google_spreadsheet_id_${opts.firebaseUid}`);
+          localStorage.removeItem(`google_sheet_tab_${opts.firebaseUid}`);
+        }
+      } catch (err) {}
+      return;
+    }
+
+    // Passed validation — set state
+    setSheetMetadata((prev) => ({
+      ...prev,
+      spreadsheetId: opts.spreadsheetId,
+      title: opts.title || prev.title,
+      sheetName: opts.sheetName || prev.sheetName || 'Sheet1',
+      availableSheets: opts.availableSheets || prev.availableSheets,
+      headers: opts.headers || prev.headers,
+      lastSynced: new Date(),
+      isDemoMode: false,
+    }));
+    setLeads([]); // will be populated by caller after sync
+    setHeaders(opts.headers || DEFAULT_HEADERS);
+  }, []);
   const resetGoogleAndSheetState = React.useCallback(() => {
     try {
       clearGoogleAuthState();
@@ -154,8 +239,8 @@ export default function App() {
     setHeaders(DEFAULT_HEADERS);
     setSheetMetadata((prev) => ({
       ...prev,
-      spreadsheetId: DEFAULT_SPREADSHEET_ID,
-      sheetName: 'Sheet1',
+      spreadsheetId: '',
+      sheetName: '',
       availableSheets: [],
       headers: DEFAULT_HEADERS,
       isDemoMode: true,
@@ -185,7 +270,7 @@ export default function App() {
     prevUserUidRef.current = curr;
   }, [currentUser, resetGoogleAndSheetState]);
 
-  // When signed in and we have a saved spreadsheet id + token, auto-sync once
+  // When signed in and we have a saved spreadsheet id, attempt secure auto-restore
   useEffect(() => {
     const tryAutoSync = async () => {
       try {
@@ -194,13 +279,21 @@ export default function App() {
         if (pending) {
           try {
             const p = JSON.parse(pending);
-            if (p && p.sheetId && currentUser && oauthToken) {
-              await handleSyncWithGoogle(p.sheetId, oauthToken, p.selectedTab || undefined);
+            // Accept only the minimal allowed shape for pending_connect
+            const allowed = p && typeof p === 'object' && Object.keys(p).every((k) => ['sheetId', 'selectedTab'].includes(k));
+            if (allowed && p.sheetId && currentUser) {
+              const verifiedToken = getAccessToken();
+              if (verifiedToken) {
+                await handleSyncWithGoogle(p.sheetId, verifiedToken, p.selectedTab || undefined);
+              }
               localStorage.removeItem('pending_connect');
               return;
+            } else {
+              // Malformed or stale pending_connect — remove it
+              localStorage.removeItem('pending_connect');
             }
           } catch (e) {
-            // ignore
+            // ignore parse errors
           }
         }
 
@@ -212,29 +305,48 @@ export default function App() {
             savedSheetId = null;
           }
         }
-        if (currentUser && oauthToken && savedSheetId) {
-          // Verify savedSheetId is actually present in the current Google account's Drive
+
+        if (currentUser && savedSheetId) {
+          // Use verified token accessor to ensure token ownership
+          const verifiedToken = getAccessToken();
+          if (!verifiedToken) {
+            try {
+              localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
+              localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
+            } catch (e) {}
+            return;
+          }
+
+          // Attempt authoritative Sheets API validation for this specific spreadsheet ID
           try {
-            const files = await listDriveSpreadsheets(oauthToken, 100, '');
-            const found = files.some((f) => f.id === savedSheetId);
-            if (found) {
-              const savedTab = (() => {
-                try {
-                  return localStorage.getItem(`google_sheet_tab_${currentUser.uid}`) || undefined;
-                } catch (e) {
-                  return undefined;
-                }
-              })();
-              await handleSyncWithGoogle(savedSheetId, oauthToken, savedTab);
-            } else {
-              // Saved sheet not present in Drive for this Google account: remove persisted keys
+            // Debug log for attempted restore
+            try {
+              // eslint-disable-next-line no-console
+              console.info('[SheetsDebug] attempting spreadsheet restore', { firebaseUid: currentUser.uid, spreadsheetId: savedSheetId });
+            } catch (e) {}
+
+            await fetchSpreadsheetTabs(savedSheetId, verifiedToken);
+
+            // validation succeeded
+            try {
+              // eslint-disable-next-line no-console
+              console.info('[SheetsDebug] spreadsheet validation', { firebaseUid: currentUser.uid, spreadsheetId: savedSheetId, valid: true });
+            } catch (e) {}
+
+            const savedTab = (() => {
               try {
-                localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
-                localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
-              } catch (e) {}
-            }
+                return localStorage.getItem(`google_sheet_tab_${currentUser.uid}`) || undefined;
+              } catch (e) {
+                return undefined;
+              }
+            })();
+            await handleSyncWithGoogle(savedSheetId, verifiedToken, savedTab);
           } catch (e) {
-            // If Drive listing failed, be conservative and do not auto-restore saved sheet
+            // validation failed — remove persisted keys and log
+            try {
+              // eslint-disable-next-line no-console
+              console.info('[SheetsDebug] spreadsheet validation', { firebaseUid: currentUser.uid, spreadsheetId: savedSheetId, valid: false });
+            } catch (err) {}
             try {
               localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
               localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
@@ -247,7 +359,7 @@ export default function App() {
     };
     tryAutoSync();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [currentUser, oauthToken]);
+  }, [currentUser]);
 
   // Persist demo changes locally
   const persistState = (newLeads: Lead[], newHeaders: string[]) => {
@@ -310,6 +422,10 @@ export default function App() {
     try {
       await googleSignOut();
     } catch (e) {}
+    // Clear app state tied to Google/Sheets before finalizing sign-out
+    try {
+      resetGoogleAndSheetState();
+    } catch (e) {}
     setCurrentUser(null);
     setOauthToken('');
     try {
@@ -329,17 +445,18 @@ export default function App() {
       const result = await syncOrCreateGoogleSheet(spreadsheetId, token, selectedTabName);
       setLeads(result.leads);
       setHeaders(result.headers);
-      setOauthToken(token);
-      setSheetMetadata((prev) => ({
-        ...prev,
+      // Use central setter to ensure all checks occur
+      setConnectedSpreadsheet({
+        firebaseUid: currentUser?.uid ?? null,
+        firebaseEmail: currentUser?.email ?? null,
+        googleEmail: getGoogleUser()?.email ?? null,
         spreadsheetId: result.spreadsheetId,
-        title: result.title || prev.title,
+        title: result.title || '',
         sheetName: result.sheetName || 'Sheet1',
         availableSheets: result.availableSheets,
         headers: result.headers,
-        lastSynced: new Date(),
-        isDemoMode: false,
-      }));
+        source: 'GOOGLE_SYNC',
+      });
       try {
         if (currentUser?.uid) {
           localStorage.setItem(`google_spreadsheet_id_${currentUser.uid}`, result.spreadsheetId);
@@ -575,58 +692,65 @@ export default function App() {
   };
 
   // 1-Click stage move from Kanban
-  const handleMoveStage = async (
-    lead: Lead,
-    nextStatus: string,
-    nextStatus2?: string
-  ) => {
-    const updated: Lead = {
-      ...lead,
-      status: nextStatus,
-      status2: nextStatus2 || lead.status2,
-    };
-    await handleSaveLead(updated);
-  };
+  const handleMoveStage = async (lead: Lead, nextStatus: string, nextStatus2?: string) => {
+    const updated: Lead = { ...lead, status: nextStatus, status2: nextStatus2 || lead.status2 };
+    const nextLeads = leads.map((l) => (l.rowIndex === updated.rowIndex ? updated : l));
+    setLeads(nextLeads);
+    persistState(nextLeads, headers);
 
-  // 1-Click follow-up date update
-  const handleUpdateFollowUpDate = async (lead: Lead, nextDate: string) => {
-    const updated: Lead = {
-      ...lead,
-      followUpDate: nextDate,
-    };
-    await handleSaveLead(updated);
-    showToast(`Rescheduled follow-up for ${lead.name} to ${nextDate}`);
-  };
-
-  // Dynamically add a new column header to the table and Google Sheet!
-  const handleAddFieldColumn = async (fieldName: string) => {
-    const cleanName = fieldName.trim();
-    if (
-      headers.some((h) => h.toLowerCase() === cleanName.toLowerCase())
-    ) {
-      return;
-    }
-
-    const nextHeaders = [...headers, cleanName];
-    setHeaders(nextHeaders);
-    persistState(leads, nextHeaders);
-    showToast(`Added column "${cleanName}" to your table and Sheet!`);
-
-    if (!sheetMetadata.isDemoMode && oauthToken) {
+    if (!sheetMetadata.isDemoMode && oauthToken && updated.rowIndex > 0) {
       try {
-        await appendHeaderColumn(
-          sheetMetadata.spreadsheetId,
-          sheetMetadata.sheetName,
-          cleanName,
-          headers.length,
-          oauthToken
-        );
+        await updateRowInSheet(sheetMetadata.spreadsheetId, sheetMetadata.sheetName, updated, headers, oauthToken);
       } catch (err: any) {
-        showToast(`Column added locally! Google Sheet note: ${err.message}`);
+        const msg = err?.message || '';
+        if (String(msg).includes('401') || String(msg).includes('403') || String(msg).toLowerCase().includes('permission denied')) {
+          try {
+            clearGoogleAuthState();
+            setOauthToken('');
+            if (currentUser?.uid) {
+              try {
+                localStorage.removeItem(`google_spreadsheet_id_${currentUser.uid}`);
+                localStorage.removeItem(`google_sheet_tab_${currentUser.uid}`);
+              } catch (e) {}
+            }
+            showToast('Google authorization expired or revoked. Please reconnect Google to continue.');
+          } catch (e) {}
+        } else {
+          showToast(`Failed to sync stage change: ${msg}`);
+        }
       }
     }
   };
 
+  // Update follow-up date for a lead
+  const handleUpdateFollowUpDate = async (lead: Lead, nextDate: string) => {
+    const updated: Lead = { ...lead, followUpDate: nextDate };
+    await handleSaveLead(updated);
+    showToast(`Rescheduled follow-up for ${lead.name} to ${nextDate}`);
+  };
+
+  // Add a new custom field/column
+  const handleAddFieldColumn = async (newHeaderName: string) => {
+    if (!newHeaderName || !newHeaderName.trim()) return;
+    const cleaned = newHeaderName.trim();
+    const newHeaders = [...headers, cleaned];
+    setHeaders(newHeaders);
+    persistState(leads, newHeaders);
+
+    if (!sheetMetadata.isDemoMode && oauthToken && sheetMetadata.spreadsheetId) {
+      try {
+        await appendHeaderColumn(sheetMetadata.spreadsheetId, sheetMetadata.sheetName || 'Sheet1', cleaned, headers.length, oauthToken);
+        setSheetMetadata((prev) => ({ ...prev, headers: newHeaders, lastSynced: new Date() }));
+        showToast(`Added new column "${cleaned}" and synced to Google Sheet`);
+      } catch (e: any) {
+        showToast(`Added locally! Failed to update Google Sheet: ${e?.message || ''}`);
+      }
+    } else {
+      showToast(`Added new field "${cleaned}" locally`);
+    }
+  };
+
+        
   const nextSlNo = useMemo(() => {
     if (leads.length === 0) return '1';
     const numVals = leads

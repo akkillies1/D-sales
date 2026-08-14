@@ -1,6 +1,7 @@
 import { Lead } from '../types';
 
-export const DEFAULT_SPREADSHEET_ID = '1CJT0fV1bSGtu_d8vC3zZsFGjIfIZDf5ch9KCM3Bftvs';
+// No global/default spreadsheet ID is defined here. Spreadsheets must be
+// explicitly connected per authenticated user and validated via the Sheets API.
 
 export const DEFAULT_HEADERS = [
   'Sl no',
@@ -686,7 +687,7 @@ export async function syncOrCreateGoogleSheet(
   const cleanId = extractSpreadsheetId(spreadsheetIdInput);
 
   // 1. If it's a real ID and not the placeholder default ID, try to sync it directly
-  if (cleanId && cleanId !== DEFAULT_SPREADSHEET_ID) {
+  if (cleanId) {
     try {
       return await syncGoogleSheetData(cleanId, accessToken, selectedTabName);
     } catch (err: any) {
